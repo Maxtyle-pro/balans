@@ -1,0 +1,11 @@
+# Replace these example domains with operator-owned DNS names.
+bot.example.org {
+    @telegram path /telegram
+    handle @telegram {
+        reverse_proxy 127.0.0.1:8080
+    }
+    respond 404
+}
+admin.example.org {
+    reverse_proxy 127.0.0.1:8088
+}

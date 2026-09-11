@@ -1,0 +1,24 @@
+[Unit]
+Description=Balans Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=balans
+Group=balans
+WorkingDirectory=/opt/balans
+EnvironmentFile=/etc/balans/runtime.env
+ExecStart=/opt/balans/.venv/bin/python -m balans
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=600
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/balans/.local
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

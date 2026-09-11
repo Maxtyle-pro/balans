@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "balans-bot"
+version = "0.18.0"
+description = "Telegram-бот для ручного учёта расходов"
+requires-python = ">=3.12"
+dependencies = ["aiogram>=3.20,<4", "psycopg[binary,pool]>=3.2,<4", "python-dotenv>=1,<2", "openai>=2,<3", "pypdf>=6,<7", "pypdfium2>=4,<6", "Pillow>=11,<13", "av>=16,<18", "reportlab>=4,<5", "google-auth[requests]>=2,<3", "cryptography>=46,<51"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+include = ["balans*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.package-data]
+balans = ["prompts/*.txt", "fonts/*.ttf", "fonts/LICENSE.txt"]

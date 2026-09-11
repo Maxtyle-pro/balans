@@ -1,0 +1,18 @@
+[Unit]
+Description=Encrypted Balans backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=balans
+Group=balans
+WorkingDirectory=/opt/balans
+EnvironmentFile=/etc/balans/backup.env
+ExecStart=/opt/balans/.venv/bin/python -m scripts.backup
+TimeoutStartSec=3600
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/balans/.local /var/backups/balans
+UMask=0077

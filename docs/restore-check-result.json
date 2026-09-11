@@ -1,0 +1,12 @@
+{
+  "restored": true,
+  "elapsed_seconds": 0.38,
+  "counts": {
+    "users": 1,
+    "operations": 2,
+    "postings": 2
+  },
+  "verified_documents": 0,
+  "replayed_deletions": 0,
+  "isolated_database_removed": true
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Half-hourly Balans backup
+
+[Timer]
+OnCalendar=*-*-* *:00,30:00
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

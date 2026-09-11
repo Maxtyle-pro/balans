@@ -1,0 +1,11 @@
+*
+!requirements.lock
+!pyproject.toml
+!balans/
+!balans/**
+!migrations/
+!migrations/**
+!scripts/
+!scripts/**
+**/__pycache__/
+**/*.pyc

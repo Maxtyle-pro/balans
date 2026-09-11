@@ -1,0 +1,48 @@
+{
+  "registered": 10000,
+  "active_users": 1000,
+  "rate_per_second": 20,
+  "duration_seconds": 300,
+  "workers": 4,
+  "intake": {
+    "count": 6000,
+    "p95_seconds": 0.0037,
+    "max_seconds": 0.0205
+  },
+  "results": {
+    "text": {
+      "count": 3600,
+      "p95_seconds": 0.0951,
+      "max_seconds": 0.1305
+    },
+    "photo": {
+      "count": 600,
+      "p95_seconds": 0.1219,
+      "max_seconds": 0.149
+    },
+    "screenshot": {
+      "count": 600,
+      "p95_seconds": 0.0967,
+      "max_seconds": 0.1055
+    },
+    "terminal": {
+      "count": 600,
+      "p95_seconds": 0.0979,
+      "max_seconds": 0.108
+    },
+    "voice": {
+      "count": 600,
+      "p95_seconds": 0.1492,
+      "max_seconds": 0.1576
+    }
+  },
+  "queue": {
+    "queued": 0,
+    "failed": 0,
+    "oldest_seconds": 0.0
+  },
+  "errors": 0,
+  "synthetic_external_services": true,
+  "measurement": "durable DB intake to internal result; excludes HTTP/TLS and Telegram; media AI replaced by fixed delay",
+  "passed": true
+}

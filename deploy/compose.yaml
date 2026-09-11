@@ -1,0 +1,29 @@
+# PostgreSQL is provisioned separately with owner/runtime/backup roles.
+services:
+  bot:
+    build:
+      context: ..
+    env_file: ./runtime.env
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 10m
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    volumes:
+      - ../.local:/app/.local
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8088:8088"
+    environment:
+      WEBHOOK_HOST: 0.0.0.0
+      ADMIN_HOST: 0.0.0.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
