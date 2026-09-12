@@ -61,7 +61,7 @@ def test_media_buttons_preserve_saved_and_reject_old_queue(receipts,database):
     blocked=send(s,u,callback='add')
     assert '/media' not in blocked.text
     resume=send(s,u,callback=button(blocked,'Продолжить список'))
-    assert 'Распознанные позиции' in resume.text
+    assert 'Операции на изображении' in resume.text
     cancel=button(blocked,'Отменить список')
     assert 'Сохранённые операции' in send(s,u,callback=cancel).text
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]

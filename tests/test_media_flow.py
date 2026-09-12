@@ -23,7 +23,7 @@ def category(db,u):return str(query(db,u,"SELECT id FROM categories WHERE name='
 
 def open_row(s,u,reply,index=1):
     if reply.text.startswith('Операция '):return reply
-    return send(s,u,callback=button(reply,'Проверить №'+str(index)))
+    return send(s,u,callback=next(data for row in reply.buttons for _,data in row if data.startswith('mreview:') and data.split(':')[2]==str(index-1)))
 
 def paid(s,u,card):return send(s,u,callback=button(card,'Операция совершена'))
 
@@ -32,7 +32,7 @@ def save_row(s,u,card):return send(s,u,callback=button(card,'Сохранить 
 def test_list_separate_confirmation_sources_and_originals(receipts,database):
     s,ai,_=receipts;u=next(USERS);send(s,u,'/start');cat=category(database,u)
     listing=extracted(s,ai,u,[transaction(cat),transaction(cat,'250')])
-    assert 'Распознанные позиции' in listing.text
+    assert 'Операции на изображении' in listing.text
     assert query(database,u,'SELECT count(*) FROM operations')==[(0,)]
     first=paid(s,u,open_row(s,u,listing));save_row(s,u,first)
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
@@ -143,3 +143,24 @@ def test_media_category_correction_can_be_learned(receipts,database):
     assert query(database,u,'SELECT count(*) FROM category_rules WHERE enabled')==[(1,)]
     card=open_row(s,u,extracted(s,ai,u,[transaction(cat,'250')]))
     assert 'Категория: Дом' in card.text
+
+
+def test_skipped_list_has_clear_empty_state(receipts,database):
+    s,ai,_=receipts;u=next(USERS);send(s,u,'/start');cat=category(database,u)
+    listing=extracted(s,ai,u,[transaction(cat),transaction(cat,'250')])
+    listing=send(s,u,callback=button(listing,'Пропустить 1'))
+    assert button(listing,'✏️ Открыть операцию').startswith('mreview:')
+    done=send(s,u,callback=button(listing,'Пропустить'))
+    assert 'ничего не сохранено' in done.text and 'Итого:' not in done.text
+    assert button(done,'➕ Добавить расход')=='add'
+    assert query(database,u,'SELECT count(*) FROM operations')==[(0,)]
+
+
+def test_finished_list_reports_saved_count(receipts,database):
+    s,ai,_=receipts;u=next(USERS);send(s,u,'/start');cat=category(database,u)
+    listing=extracted(s,ai,u,[transaction(cat),transaction(cat,'250')])
+    save_row(s,u,paid(s,u,open_row(s,u,listing)))
+    listing=send(s,u,'/media')
+    done=send(s,u,callback=button(listing,'Пропустить'))
+    assert 'Сохранено операций: 1' in done.text
+    assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]

@@ -38,6 +38,10 @@ class MediaFlow:
         if not q:return Reply('Отправьте чек или скриншот.')
         pending=[i for i,item in enumerate(q['items']) if item['state']=='pending']
         if not pending:c.execute("UPDATE media_queues SET state='done' WHERE id=%s",(q['id'],))
+        if not pending:
+            saved=sum(item['state']=='saved' for item in q['items'])
+            text=(f'✅ Готово! Сохранено операций: {saved}.'+('\nОстальные позиции пропущены.' if any(item['state']=='excluded' for item in q['items']) else '') if saved else 'Список завершён. Вы пропустили все позиции — ничего не сохранено.')
+            return Reply(text,[[('🕘 Открыть историю','history'),('➕ Добавить расход','add')],[('☰ Все действия','ui:menu')]])
         categories={str(cat['id']):cat['name'] for cat in self._categories(c,q['workspace_id'])}
         totals={};groups={};rows=[]
         visible=set(pending[:8] if pending else range(min(8,len(q['items']))))
@@ -49,15 +53,16 @@ class MediaFlow:
             if item['amount']:
                 key=(item['kind'],item['currency'] or '?');totals[key]=totals.get(key,Decimal(0))+Decimal(item['amount'])
                 key=(category,item['kind'],item['currency'] or '?');groups[key]=groups.get(key,Decimal(0))+Decimal(item['amount'])
-        text='Распознанные позиции\n'+'\n'.join(rows)
-        text+='\nИтого: '+'; '.join(f"{KINDS.get(kind,'Операции')}: {money(value,currency)}" for (kind,currency),value in totals.items())
-        if grouped:text+='\nПо категориям:\n'+'\n'.join(f"{category}: {money(value,currency)}" for (category,kind,currency),value in groups.items())
+        text='📷 Операции на изображении\n\n'+'\n\n'.join(rows)
+        if totals:text+='\n\nСумма в списке: '+'; '.join(f"{KINDS.get(kind,'Операции')}: {money(value,currency)}" for (kind,currency),value in totals.items())
+        if grouped and groups:text+='\nПо категориям:\n'+'\n'.join(f"{category}: {money(value,currency)}" for (category,kind,currency),value in groups.items())
+        text+='\n\nОткройте операцию, уточните данные и подтвердите сохранение. «Пропустить» уберёт её из списка без записи в расходы.'
         buttons=[]
         if len(pending)>1:
             buttons.append([('Разбить по категориям',f"mgroup:{q['id']}:{q['version']}")])
             if any(q['items'][i]['kind']=='expense' for i in pending):buttons.append([('Выбрать другую категорию',f"mallcat:{q['id']}:{q['version']}")])
         if len(pending)>8:text+=f'\nЕщё позиций: {len(pending)-8}. Следующие появятся после обработки показанных.'
-        buttons += [[(f'Проверить №{i+1}',f"mreview:{q['id']}:{i}:{q['version']}"),(f'Исключить №{i+1}',f"mdrop:{q['id']}:{i}:{q['version']}")] for i in pending[:8]]
+        buttons += [[((f'✏️ Открыть операцию {i+1}' if len(pending)>1 else '✏️ Открыть операцию'),f"mreview:{q['id']}:{i}:{q['version']}"),((f'Пропустить {i+1}' if len(pending)>1 else 'Пропустить'),f"mdrop:{q['id']}:{i}:{q['version']}")] for i in pending[:8]]
         if pending:buttons.append([('Отменить оставшееся',f"mstop:{q['id']}")])
         return Reply(text,buttons)
 
