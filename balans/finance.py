@@ -32,7 +32,7 @@ class Finance:
 
     def _finance_new(self,c,user,sent,kind,value=None,description='',day=None,destination=None,refund=None):
         if self._document_upload(c):return Reply('Сначала завершите прикрепление документа или /cancel.')
-        if self._media_queue(c):return Reply('Сначала завершите список изображений: /media.')
+        if self._media_queue(c):return self._media_blocker(c)
         if kind=='income' and c.execute("SELECT kind='shared' AS shared FROM workspaces WHERE id=current_workspace()").fetchone()['shared']:
             return Reply('Приход в совместном бюджете требует сверки: /claim сумма | дата | источник | назначение. Получение по выдаче: /funds.')
         if self._draft(c):return self._prompt(c,self._draft(c))

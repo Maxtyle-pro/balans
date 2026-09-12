@@ -29,6 +29,11 @@ class MediaFlow:
         queue=c.execute('INSERT INTO media_queues(workspace_id,author_user_id,source_batch_id,items) VALUES(%s,%s,%s,%s) RETURNING *',(batch['workspace_id'],batch['author_user_id'],batch['id'],Jsonb(items))).fetchone()
         return self._media_card(c,queue,0) if len(items)==1 else self._media_list(c,queue,grouped=True)
 
+    def _media_blocker(self,c):
+        q=self._media_queue(c)
+        if not q:return Reply('Список уже завершён.')
+        return Reply('Сначала завершите список изображений или отмените оставшиеся позиции. Сохранённые операции останутся.',[[('Продолжить список',f"mlist:{q['id']}"),('Отменить список',f"mstop:{q['id']}")]])
+
     def _media_list(self,c,q,grouped=False):
         if not q:return Reply('Отправьте чек или скриншот.')
         pending=[i for i,item in enumerate(q['items']) if item['state']=='pending']
@@ -53,6 +58,7 @@ class MediaFlow:
             if any(q['items'][i]['kind']=='expense' for i in pending):buttons.append([('Выбрать другую категорию',f"mallcat:{q['id']}:{q['version']}")])
         if len(pending)>8:text+=f'\nЕщё позиций: {len(pending)-8}. Следующие появятся после обработки показанных.'
         buttons += [[(f'Проверить №{i+1}',f"mreview:{q['id']}:{i}:{q['version']}"),(f'Исключить №{i+1}',f"mdrop:{q['id']}:{i}:{q['version']}")] for i in pending[:8]]
+        if pending:buttons.append([('Отменить оставшееся',f"mstop:{q['id']}")])
         return Reply(text,buttons)
 
     def _split_lines(self,c,parent,workspace):
@@ -214,7 +220,7 @@ class MediaFlow:
 
     def _media_callback(self,c,user,callback,sent):
         action,_,raw=callback.partition(':')
-        if action not in ('mreview','mdrop','mlist','mkind','msource','mf','mpaid','mhold','mduplicate','msave','mlink','mlinkok','msplit','mallcat','mc','mgroup'):return None
+        if action not in ('mstop','mreview','mdrop','mlist','mkind','msource','mf','mpaid','mhold','mduplicate','msave','mlink','mlinkok','msplit','mallcat','mc','mgroup'):return None
         q=self._media_queue(c)
         if not q:return Reply('Список завершён или недоступен. Повторных записей нет.')
         if action in ('msplit','mallcat','mc','mgroup'):return self._media_category_callback(c,q,action,raw)
@@ -240,6 +246,9 @@ class MediaFlow:
         if action in ('mkind','msource','mf'):value,_,raw=raw.partition(':')
         parts=raw.split(':')
         if UUID(parts[0])!=q['id']:return Reply('Список недоступен.')
+        if action=='mstop':
+            c.execute("UPDATE media_queues SET state='cancelled' WHERE id=%s",(q['id'],))
+            return Reply('Оставшиеся позиции отменены. Сохранённые операции остались.',[[('➕ Добавить расход','add'),('☰ Все действия','ui:menu')]])
         if action=='mlist':return self._media_list(c,q)
         if len(parts)!=3 or int(parts[2])!=q['version']:return Reply('Карточка устарела. /media — текущий результат.')
         index=int(parts[1])

@@ -70,6 +70,7 @@ def migrate(dsn: str, runtime_role: str) -> None:
         conn.execute(sql.SQL("GRANT UPDATE(ai_enabled,ai_consent_version,ai_consented_at) ON balans.user_settings TO {}").format(role))
         conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION balans.change_category(uuid) TO {}").format(role))
         conn.execute(sql.SQL("GRANT USAGE ON SCHEMA balans TO {}").format(role))
+        conn.execute(sql.SQL("GRANT INSERT,UPDATE,DELETE ON balans.ui_inputs TO {}").format(role))
         conn.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA balans TO {}").format(role))
         conn.execute(sql.SQL("GRANT INSERT, UPDATE ON balans.operation_drafts TO {}").format(role))
         conn.execute(sql.SQL("GRANT INSERT ON balans.telegram_updates TO {}").format(role))

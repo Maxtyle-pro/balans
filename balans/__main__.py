@@ -53,7 +53,7 @@ async def process_update(bot, service, update):
             reply=await receive_file(bot,service,update,message,sender)
             await deliver_reply(bot,message.chat.id,reply,service)
         else:
-            await bot.send_message(message.chat.id, 'Доступны голосовые сообщения, фото/PDF чеков и ручной ввод. /voice — голос. /receipts — чеки; /manual — ручной ввод.')
+            await deliver_reply(bot,message.chat.id,Reply('Доступны голосовые сообщения, фото/PDF чеков и ручной ввод. Выберите способ:',[[('🎙 Голос','ui:go:voice'),('📷 Чек','ui:go:receipts')],[('✍️ Вручную','ui:go:manual'),('☰ Все действия','ui:menu')]]),service)
         return
     if query:
         try:
@@ -67,10 +67,12 @@ async def process_update(bot, service, update):
 
 
 async def deliver_reply(bot,chat_id,reply,service=None):
+    from balans.command_ui import present_reply
+    reply=present_reply(reply)
     if reply.invoice_id and service:
         invoice=await asyncio.to_thread(service.prepare_invoice,chat_id,reply.invoice_id)
         if not invoice:
-            await bot.send_message(chat_id,'Счёт истёк или оплата выключена. /subscription');return
+            await deliver_reply(bot,chat_id,Reply('Счёт истёк или оплата выключена.',[[('⭐ Моя подписка','subscription')]]),service);return
         from aiogram.types import LabeledPrice
         url=invoice['invoice_url']
         if not url:
@@ -90,7 +92,7 @@ async def deliver_reply(bot,chat_id,reply,service=None):
         for row in reply.buttons]) if reply.buttons else None
     if reply.text:await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
     for part in reply.messages:
-        await bot.send_message(chat_id,part)
+        await deliver_reply(bot,chat_id,Reply(part),service)
     if reply.generated_document:
         await bot.send_document(chat_id,BufferedInputFile(base64.b64decode(reply.generated_document),filename=reply.generated_filename))
     for file_id in reply.photo_ids:

@@ -179,7 +179,7 @@ async def notification_loop(bot,service):
                 n=await asyncio.to_thread(service.prepare_notification,actor,identity)
                 if not n:continue
                 try:
-                    await bot.send_message(actor,n['message'],reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть',callback_data=f'nopen:{identity}')]]))
+                    await bot.send_message(actor,n['message'],reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть',callback_data=f'nopen:{identity}')],[InlineKeyboardButton(text='⚙️ Уведомления',callback_data='ui:go:notify'),InlineKeyboardButton(text='☰ Все действия',callback_data='ui:menu')]]))
                 except TelegramForbiddenError:
                     await asyncio.to_thread(service.notifications_blocked,actor)
                     await asyncio.to_thread(service.finish_notification,actor,identity,'cancelled')

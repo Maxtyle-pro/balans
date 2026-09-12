@@ -1,4 +1,5 @@
 """Durable conversation: each update and its response commit atomically."""
+from balans.command_ui import CommandUI
 from dataclasses import asdict
 from datetime import datetime
 from uuid import UUID
@@ -56,17 +57,15 @@ HELP = ('/subscription — подписка и оплата\n/diagnostic — п�
         '/support — поддержка\n/help — помощь\n\n'
         'Можно отправить сумму без команды. Сохранение — только после подтверждения. '
         'Доступны личные и совместные бюджеты, RUB, USD и EUR. /privacy — приватность; /delete — удаление профиля; /exchange — обмен; /fx — ручной курс.')
-QUICK_HELP = ('Как пользоваться Балансом\n\n'
-              '• Напишите «Кофе 250» или «Зарплата 50000».\n'
-              '• Отправьте голосовое сообщение или фото чека.\n'
-              '• Проверьте запись и подтвердите сохранение.\n\n'
-              '/history — ваши записи\n/report — отчёт за месяц\n'
-              '/accounts — счета и остатки\n/workspaces — выбор бюджета\n\n'
-              '/cancel — отменить ввод\n/help — все команды\n/support — поддержка')
-MENU = [[('Добавить расход', 'add'), ('История', 'history')], [('Итог месяца', 'report'), ('Счёт', 'accounts')]]
+QUICK_HELP = ('💡 Как пользоваться Балансом\n\n'
+              '✍️ Напишите «Кофе 250» или «Зарплата 50000».\n'
+              '🎙 Отправьте голосовое сообщение или фото чека.\n'
+              '✅ Проверьте запись и подтвердите сохранение.\n\n'
+              '📊 История, отчёты, счета и настройки — в меню «Все действия».')
+MENU = [[('Добавить расход', 'add'), ('История', 'history')], [('Итог месяца', 'report'), ('Счёт', 'accounts')], [('☰ Все действия','ui:menu')]]
 
 
-class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Billing, Planning, Notifications, SharedReports, Sharing, MediaFlow, Documents, Funds, Workspaces, InputFlow, Finance, Reports, Voice, Receipts, Categorization):
+class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Billing, Planning, Notifications, SharedReports, Sharing, MediaFlow, Documents, Funds, Workspaces, InputFlow, Finance, Reports, Voice, Receipts, Categorization):
     def __init__(self, dsn: str, support: str = '', ai: CategoryAI | None = None, receipt_ai=None, receipt_storage=None, voice_ai=None, report_ai=None, sheets=None, admin_config=None):
         self.pool = ConnectionPool(dsn, min_size=1, max_size=5, open=True, kwargs={'row_factory': dict_row})
         self.admin_config=admin_config or AdminConfig.from_env()
@@ -178,7 +177,7 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
 
     def _new(self, c, user_id, sent_at, amount=None, flow='auto'):
         if self._document_upload(c):return Reply('Сначала завершите прикрепление документа или /cancel.')
-        if self._media_queue(c):return Reply('Сначала завершите список изображений: /media; /media cancel — отменить оставшееся.')
+        if self._media_queue(c):return self._media_blocker(c)
         pending = self._draft(c)
         if pending:
             reply = self._prompt(c, pending)
@@ -195,6 +194,8 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
         return self._prompt(c, self._draft(c))
 
     def _dispatch(self, c, user_id, text, sent_at, callback):
+        ui=self._ui_entry(c,user_id,text,sent_at,callback)
+        if ui is not None:return ui
         if callback:
             privacy=self._privacy_callback(c,user_id,callback)
             if privacy is not None:return privacy
@@ -234,7 +235,7 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
             if category_reply is not None:
                 return category_reply
             if callback == 'howto':
-                return Reply(QUICK_HELP, [[('Моя подписка','subscription'),('Ежемесячный отчёт','monthlysettings')],[('Назад','start')]])
+                return Reply(QUICK_HELP, [[('Моя подписка','subscription'),('Ежемесячный отчёт','monthlysettings')],[('☰ Все действия','ui:menu')],[('Назад','start')]])
             if callback in ('add', 'history', 'report', 'accounts', 'start', 'subscription', 'renewal', 'workspaces'):
                 return self._dispatch(c, user_id, '/' + callback, sent_at, None)
             action, _, raw_id = callback.partition(':')
@@ -317,7 +318,9 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
             return self._welcome(c)
         if command == '/help':
             intro=c.execute("SELECT value FROM service_content WHERE key='help_intro'").fetchone()
-            return Reply(intro['value'] if intro else HELP,MENU,messages=[HELP] if intro else [])
+            reply=self._ui_menu(c)
+            if intro:reply.text=intro['value']
+            return reply
         if command == '/support':
             return Reply(self.support or 'Контакт поддержки пока не настроен владельцем бота.')
         if command == '/cancel':
