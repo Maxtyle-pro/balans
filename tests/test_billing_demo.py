@@ -27,7 +27,7 @@ def test_demo_full_flow_without_real_payment(service,database):
     s=service;u=enable(s,database)
     r=send(s,u,'/start');assert 'Тестовая оплата' in r.text
     assert len(r.buttons)==2
-    r=send(s,u,callback=button(r,'Начать 7 дней бесплатно'))
+    r=send(s,u,callback=button(r,'🎁 Начать 7 дней бесплатно'))
     assert '100 Stars' in r.text
     send(s,u,callback=button(r,'Понятно, начать'))
     assert query(database,u,'SELECT trial_started_at FROM billing_accounts')==[(None,)]
@@ -50,7 +50,7 @@ def test_demo_full_flow_without_real_payment(service,database):
     assert not r.renewal_invoice_id and 'выключено' in r.text
     assert query(database,u,'SELECT paid_until FROM billing_demo')==[(deadline,)]
     panel=send(s,u,'/demo');r=send(s,u,callback=button(panel,'Новый пользователь'))
-    assert 'Начать 7 дней бесплатно' in [label for row in r.buttons for label,_ in row]
+    assert '🎁 Начать 7 дней бесплатно' in [label for row in r.buttons for label,_ in row]
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert 'устарел' in send(s,u,callback=pay).text
     send(s,u,'/demo off')

@@ -88,7 +88,7 @@ async def deliver_reply(bot,chat_id,reply,service=None):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data=data) for label, data in row]
         for row in reply.buttons]) if reply.buttons else None
-    if reply.text:await bot.send_message(chat_id,reply.text,reply_markup=keyboard)
+    if reply.text:await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
     for part in reply.messages:
         await bot.send_message(chat_id,part)
     if reply.generated_document:

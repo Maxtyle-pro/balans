@@ -31,6 +31,7 @@ class Reply:
     receipt_operation_id: str | None = None
     document_ids: list[str] = field(default_factory=list)
     photo_ids: list[str] = field(default_factory=list)
+    parse_mode: str | None = None
 
 
 def amount_from_text(value: str) -> Decimal:

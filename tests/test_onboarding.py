@@ -19,10 +19,10 @@ def test_start_terms_and_activation_once(database,billing):
     try:
         r=send(s,u,'/start')
         assert len(r.text)<400 and not r.messages
-        assert [label for row in r.buttons for label,_ in row]==['Начать 7 дней бесплатно','Как пользоваться']
+        assert [label for row in r.buttons for label,_ in row]==['🎁 Начать 7 дней бесплатно','💡 Как пользоваться']
         assert query(database,u,'SELECT trial_started_at FROM billing_accounts')==[(None,)]
         assert 'Сначала начните' in send(s,u,'Кофе 250').text
-        offer=send(s,u,callback=button(r,'Начать 7 дней бесплатно'))
+        offer=send(s,u,callback=button(r,'🎁 Начать 7 дней бесплатно'))
         assert '100 Stars за 30 дней' in offer.text and 'автоматического списания нет' in offer.text
         assert not offer.invoice_id and not query(database,u,'SELECT id FROM billing_invoices')
         accept=button(offer,'Понятно, начать')
@@ -36,7 +36,7 @@ def test_start_terms_and_activation_once(database,billing):
         assert query(database,u,'SELECT enabled,monthly FROM notification_preferences')==[(True,True)]
         send(s,u,callback=accept)
         assert query(database,u,'SELECT trial_until FROM billing_accounts')==[(until,)]
-        assert '＋ Добавить расход' in [x for row in send(s,u,'/start').buttons for x,_ in row]
+        assert '➕ Добавить расход' in [x for row in send(s,u,'/start').buttons for x,_ in row]
         r=send(s,u,'Кофе 250');assert len(s.ai.calls)==1
         r=send(s,u,callback=button(r,'Подтвердить категорию'))
         r=send(s,u,callback=button(r,'Сохранить'))
@@ -73,7 +73,7 @@ def test_trial_keeps_deadline_and_snapshot_when_tariff_changes(service,database,
 def test_disabled_billing_and_short_help(service,database):
     u=next(USERS);r=send(service,u,'/start')
     assert 'бесплатно' not in ' '.join(x for row in r.buttons for x,_ in row)
-    r=send(service,u,callback=button(r,'Как пользоваться'))
+    r=send(service,u,callback=button(r,'💡 Как пользоваться'))
     assert len(r.text)<700 and not r.messages
     assert 'Моя подписка' in [x for row in r.buttons for x,_ in row]
     assert 'пока не включена' in send(service,u,callback='trialinfo').text

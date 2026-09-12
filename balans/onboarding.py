@@ -1,17 +1,19 @@
 """Short entry screens and explicit, idempotent trial activation."""
 import hashlib
 import json
+from html import escape
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from psycopg.types.json import Jsonb
 from balans.domain import Reply
 
-WELCOME = ('Баланс — ИИ-бот для учёта расходов и доходов.\n\n'
-           'Отправьте сообщение, голосовое или чек — бот определит категорию '
-           'и сохранит операцию после вашего подтверждения.\n\n'
-           'Отчёты — каждый месяц и по запросу.')
+WELCOME = ('💰 <b>Баланс — ваш ИИ-помощник</b>\n'
+           'Расходы и доходы в одном чате.\n\n'
+           '✍️ Напишите <code>Кофе 250</code>, отправьте голосовое или фото чека.\n'
+           '✨ Бот определит категорию — вам останется подтвердить запись.\n\n'
+           '📊 <b>Отчёты каждый месяц и по запросу.</b>')
 DEMO_BADGE='Тестовая оплата · Stars не списываются.\n\n'
-ENTRY_MENU = [[('＋ Добавить расход', 'add')], [('Как пользоваться', 'howto')]]
+ENTRY_MENU = [[('➕ Добавить расход', 'add')], [('💡 Как пользоваться', 'howto')]]
 
 
 def paid_quotas(cfg):
@@ -41,14 +43,14 @@ class Onboarding:
         access=c.execute('SELECT billing_access() AS data').fetchone()['data']
         status=access['status'];text=(DEMO_BADGE if cfg.get('demo') else '')+WELCOME
         if status=='not_started':
-            buttons=[[(f"Начать {cfg['trial_days']} дней бесплатно",'trialinfo')],[('Как пользоваться','howto')]]
+            buttons=[[(f"🎁 Начать {cfg['trial_days']} дней бесплатно",'trialinfo')],[('💡 Как пользоваться','howto')]]
         elif status in ('expired','suspended'):
             text+='\n\n'+('Доступ приостановлен.' if status=='suspended' else 'Период доступа завершён. История и экспорт доступны.')
-            buttons=[[('Моя подписка','subscription')],[('Как пользоваться','howto')]]
+            buttons=[[('⭐ Моя подписка','subscription')],[('💡 Как пользоваться','howto')]]
         else:
             buttons=ENTRY_MENU
-            if status=='trial':text+='\n\nБесплатный период до '+self._local_deadline(c,access['until'])+'.'
-        return Reply(text,buttons)
+            if status=='trial':text+='\n\n🎁 Бесплатный период до '+escape(self._local_deadline(c,access['until']))+'.'
+        return Reply(text,buttons,parse_mode='HTML')
 
     def _trial_offer(self,c):
         cfg=self._billing_config(c)
