@@ -143,7 +143,10 @@ def test_saved_category_revision_no_new_money(ai_service,database):
     assert query(database,user,"SELECT count(*) FROM audit_log WHERE action='category_changed'")==[(1,)]
     # History can open category correction on any saved operation, including older ones.
     history=send(service,user,'/history')
-    assert 'Выберите новую' in send(service,user,callback=button(history,'Категория №1')).text
+    send(service,user,callback=button(history,'✏️ Изменить расход'))
+    edit=send(service,user,'1')
+    choices=send(service,user,callback=button(edit,'Категория'))
+    assert button(choices,'Продукты')
 
 
 def test_old_feedback_and_foreign_saved_actions(ai_service,database):

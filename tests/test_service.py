@@ -112,8 +112,8 @@ def test_validation_navigation_settings(service,database):
     assert 'положительным целым' in send(service,user,'/history -1').text
     for _ in range(6):
         send(service,user,callback=draft(service,user,'1'))
-    assert '/history 2' in send(service,user,'/history').text
-    assert '/history 1' in send(service,user,'/history 2').text
+    assert any(data=='ui:go:history:2' for row in send(service,user,'/history').buttons for _,data in row)
+    assert any(data=='ui:go:history:1' for row in send(service,user,'/history 2').buttons for _,data in row)
 
 
 def test_migration_replay(database):

@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 import re
 from uuid import UUID
 from balans.domain import Reply
+from balans.history_ui import HistoryUI
 
 
 @dataclass(frozen=True)
@@ -131,7 +132,7 @@ def present_reply(reply):
     return replace(reply,buttons=rows)
 
 
-class CommandUI:
+class CommandUI(HistoryUI):
     def _ui_menu(self,c,section=''):
         if section:
             if section not in SECTIONS:return Reply('Раздел недоступен.',[[('☰ Все действия','ui:menu')]])
@@ -156,6 +157,8 @@ class CommandUI:
         return self._ui_menu(c)
 
     def _ui_entry(self,c,user,text,sent,callback):
+        history=self._history_entry(c,user,text,sent,callback)
+        if history is not None:return history
         if callback and callback.startswith('ui:inputcancel:'):
             c.execute('DELETE FROM ui_inputs WHERE user_id=%s AND id=%s',(user,UUID(callback.split(':')[-1])))
             return self._ui_menu(c)

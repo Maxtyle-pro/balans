@@ -8,7 +8,7 @@ from test_receipts import button
 USERS=count(80000000)
 
 
-def confirm(s,u,reply):return send(s,u,callback=button(reply,'Подтвердить'))
+def confirm(s,u,reply):return send(s,u,callback=next(data for row in reply.buttons for label,data in row if label in ('Подтвердить','Сохранить изменения')))
 def operation(db,u,kind):return str(query(db,u,'SELECT id FROM operations WHERE kind=%s ORDER BY created_at DESC LIMIT 1',(kind,))[0][0])
 def balances(db,u):return dict(query(db,u,'SELECT a.name,coalesce(sum(p.delta),0) FROM accounts a LEFT JOIN postings p ON p.account_id=a.id GROUP BY a.id,a.name'))
 
@@ -60,10 +60,10 @@ def test_refund_partial_limits_and_cancel(service,database):
 def test_revision_and_stale_callbacks(service,database):
     s=service;u=next(USERS);send(s,u,callback=draft(s,u,'100'))
     identity=operation(database,u,'expense');card=send(s,u,callback='fedit:'+identity)
-    stale=button(card,'Подтвердить')
+    stale=button(card,'Сохранить изменения')
     send(s,u,callback=button(card,'Сумма'));card=send(s,u,'150')
     assert 'устарела' in send(s,u,callback=stale).text
-    saved=button(card,'Подтвердить')
+    saved=button(card,'Сохранить изменения')
     with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(lambda _:send(s,u,callback=saved),range(2)))
     assert balances(database,u)['Основной']==-150
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(2,)]

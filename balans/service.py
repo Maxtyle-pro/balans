@@ -344,18 +344,7 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
             if arg and (not arg.isascii() or not arg.isdigit() or len(arg)>6 or int(arg)<1):
                 raise ValueError('Номер страницы должен быть положительным целым: /history 2')
             page = int(arg or '1')
-            rows = c.execute('SELECT o.id,o.created_by_user_id=actor_user_id() AS editable,o.kind,o.state,d.receipt_batch_id,r.amount,r.currency,r.description,r.occurred_on,coalesce(cat.name,chr(8212)) AS name FROM operations o JOIN operation_drafts d ON d.id=o.source_draft_id JOIN operation_revisions r ON r.id=o.current_revision_id LEFT JOIN categories cat ON cat.id=r.category_id ORDER BY o.created_at DESC,o.id DESC LIMIT 6 OFFSET %s', ((page-1)*5,)).fetchall()
-            if not rows:
-                return Reply('На этой странице расходов нет. /add — добавить; /history — начало.')
-            lines = [f"{KINDS[r['kind']]}{' (отменена)' if r['state']=='cancelled' else ''} · {r['occurred_on']:%d.%m.%Y} · {money(r['amount'],r['currency'])} · {r['name']}\n{r['description'] or '—'}" for r in rows[:5]]
-            navigation = f'\n/history {page+1} — далее' if len(rows)>5 else ''
-            if page>1:
-                navigation += f'\n/history {page-1} — назад'
-            return Reply(f'Расходы · страница {page}\n\n' + '\n\n'.join(lines) + navigation,
-                         [([(f"Категория №{i}",f"opcat:{r['id']}")] if r['editable'] and r['kind']=='expense' and r['state']=='active' else [])
-                          + ([('Изменить',f"fedit:{r['id']}"),('Отменить запись',f"fdelete:{r['id']}")] if r['editable'] and r['state']=='active' else [('История изменений',f"faudit:{r['id']}")])
-                          + ([('Возврат',f"frefund:{r['id']}")] if r['editable'] and r['kind']=='expense' and r['state']=='active' else [])
-                          + ([('Чек',f"rview:{r['id']}"),('Позиции',f"ritems:{r['id']}")] if r['receipt_batch_id'] else []) + [('Документы',f"docview:operation:{r['id']}")] for i,r in enumerate(rows[:5],start=1)])
+            return self._history_page(c,page)
         if command.startswith('/'):
             return Reply('Неизвестная команда. /help — доступные команды.')
         media=self._media_queue(c)

@@ -13,7 +13,7 @@ def account(s,u,name='Доллары',currency='USD'):
     r=send(s,u,f'/account {name} | {currency}')
     return send(s,u,callback=button(r,'Использовать этот счёт'))
 
-def confirm(s,u,r):return send(s,u,callback=button(r,'Подтвердить'))
+def confirm(s,u,r):return send(s,u,callback=next(data for row in r.buttons for label,data in row if label in ('Подтвердить','Сохранить изменения')))
 
 
 def test_native_accounts_reports_and_export(service,database):
