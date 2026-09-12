@@ -15,13 +15,18 @@ USERS=count(150000000)
 @pytest.fixture
 def billing(database):
     with psycopg.connect(database[0]) as c:
-        c.execute("UPDATE balans.billing_config SET enabled=true,stars=100,owner_telegram_id=999,trial_days=7,text_quota=1,voice_seconds=60,image_quota=2,terms_url='https://example.org/terms',support_contact='@support'")
+        c.execute("UPDATE balans.billing_config SET enabled=true,stars=100,owner_telegram_id=999,trial_days=7,trial_text_quota=1,trial_voice_seconds=60,trial_image_quota=2,trial_analysis_quota=3,text_quota=1,voice_seconds=60,image_quota=2,terms_url='https://example.org/terms',support_contact='@support'")
     yield
     with psycopg.connect(database[0]) as c:c.execute('UPDATE balans.billing_config SET enabled=false')
 
 
 def invoice(s,u):
-    r=send(s,u,'/subscription');return send(s,u,callback=button(r,'Прочитал условия, перейти к оплате')).invoice_id
+    r=send(s,u,callback='billdetails');return send(s,u,callback=button(r,'Прочитал условия, перейти к оплате')).invoice_id
+
+def start_trial(s,u):
+    offer=send(s,u,callback='trialinfo')
+    return send(s,u,callback=button(offer,'Понятно, начать'))
+
 
 def payment(identity,charge='charge-1',end=None):
     return {'invoice_payload':identity,'telegram_payment_charge_id':charge,'currency':'XTR','total_amount':100,'is_recurring':True,'is_first_recurring':True,'subscription_expiration_date':int((end or datetime.now(timezone.utc)+timedelta(days=30)).timestamp())}
@@ -57,10 +62,11 @@ def test_checkout_payment_dedup_and_order(service,database,billing):
 
 def test_refund_before_success_and_expired_read_only(service,database,billing):
     s=service;u=next(USERS)
+    start_trial(s,u)
     send(s,u,callback=draft(s,u,'100'))
     identity=invoice(s,u);p=payment(identity,charge=f'refundfirst-{u}')
     s.record_payment(u,p,True);s.record_payment(u,p)
-    with psycopg.connect(database[0]) as c:c.execute('UPDATE balans.billing_config SET trial_days=0')
+    with s._actor_transaction(u) as c:c.execute("UPDATE billing_accounts SET trial_until=now()-interval '1 second' WHERE user_id=actor_user_id()")
     assert 'Доступ истёк' in send(s,u,'/subscription').text
     assert 'завершён' in send(s,u,'/manual 200').text
     assert '100,00' in send(s,u,'/history').text
@@ -83,7 +89,7 @@ def test_shared_access_uses_owner_and_admin_free(service,database,billing):
 def test_quota_reservation_and_release(database,billing):
     s=Service(database[1],ai=FakeAI(error='timeout'));u=next(USERS)
     try:
-        send(s,u,'/start')
+        start_trial(s,u)
         with s._actor_transaction(u) as c:c.execute('UPDATE user_settings SET ai_enabled=true WHERE user_id=actor_user_id()')
         send(s,u,'/add 10');send(s,u,'Кофе')
         assert query(database,u,'SELECT state FROM quota_reservations')==[('released',)]
@@ -101,6 +107,7 @@ def test_concurrent_shared_quota_is_reserved_once(database,billing):
     s=Service(database[1],ai=FakeAI())
     try:
         owner,user=setup(s)
+        start_trial(s,owner)
         for u in (owner,user):
             with s._actor_transaction(u) as c:c.execute('UPDATE user_settings SET ai_enabled=true WHERE user_id=actor_user_id()')
             send(s,u,'/add 100')

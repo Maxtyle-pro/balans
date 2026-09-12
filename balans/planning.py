@@ -42,6 +42,13 @@ def latest_slot(now, zone, send_minute, weekday=None):
     return slot.astimezone(timezone.utc)
 
 
+def monthly_slot(now, zone, send_minute):
+    local=now.astimezone(ZoneInfo(zone))
+    slot=local.replace(day=1,hour=send_minute//60,minute=send_minute%60,second=0,microsecond=0)
+    if slot>local:slot=(slot-timedelta(days=1)).replace(day=1)
+    return slot.astimezone(timezone.utc)
+
+
 class Planning:
     def _preference(self,c):
         c.execute('INSERT INTO notification_preferences(workspace_id,user_id,telegram_user_id) VALUES(current_workspace(),actor_user_id(),actor_telegram_id()) ON CONFLICT DO NOTHING')
@@ -90,8 +97,9 @@ class Planning:
             if parts in (['on'],['off']):
                 updates={'enabled':parts[0]=='on','blocked':False}
                 if parts[0]=='on' and not pref['enabled']:updates['enabled_at']=sent
-            elif len(parts)==2 and parts[0] in ('budget','reminder','weekly') and parts[1] in ('on','off'):
-                updates[{'budget':'budget_alerts','reminder':'reminder','weekly':'weekly'}[parts[0]]] = parts[1]=='on'
+            elif len(parts)==2 and parts[0] in ('budget','reminder','weekly','monthly') and parts[1] in ('on','off'):
+                updates[{'budget':'budget_alerts','reminder':'reminder','weekly':'weekly','monthly':'monthly'}[parts[0]]] = parts[1]=='on'
+                if parts[0]=='monthly' and parts[1]=='on' and not pref['monthly']:updates['monthly_enabled_at']=sent
             elif len(parts)==2 and parts[0]=='events' and parts[1] in ('off','instant','daily'):updates['shared_mode']=parts[1]
             elif len(parts)==2 and parts[0]=='types':
                 values=list(dict.fromkeys(parts[1].split(',')))
@@ -105,6 +113,8 @@ class Planning:
             from psycopg import sql
             c.execute(sql.SQL('UPDATE notification_preferences SET {},next_check_at=now() WHERE id=%s').format(sql.SQL(',').join(sql.SQL('{}=%s').format(sql.Identifier(k)) for k in updates)),(*updates.values(),pref['id']))
             pref=self._preference(c)
+            if updates.get('monthly') is False:
+                c.execute("UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=current_workspace() AND state='pending' AND kind='monthly'")
             # Never revive pending events after disabling and later re-enabling.
             if 'event_types' in updates or updates.get('shared_mode')=='off':
                 c.execute("UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=current_workspace() AND state='pending' AND kind IN ('event','digest')")
@@ -114,4 +124,4 @@ class Planning:
                 c.execute("UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=current_workspace() AND state='pending'")
                 c.execute('UPDATE notification_events SET processed=true WHERE workspace_id=current_workspace() AND NOT processed')
         fmt=lambda n:'выключены' if n is None else f'{n//60:02}:{n%60:02}'
-        return Reply(f"Уведомления: {self._workspace_name(c)}\nДоставка: {'включена' if pref['enabled'] else 'выключена'}\nЛимиты 80/100%: {pref['budget_alerts']}\nНапоминание: {pref['reminder']}\nНедельный отчёт: {pref['weekly']}\nСобытия: {pref['shared_mode']} ({','.join(pref['event_types'])})\nВремя: {fmt(pref['send_minute'])}, день недели: {pref['weekday']} (0 = пн)\nТихие часы: {fmt(pref['quiet_start'])}–{fmt(pref['quiet_end'])}\nЧасовой пояс — из /settings.\n\n/notify on или off — вся доставка\n/notify budget on\n/notify reminder on\n/notify weekly on\n/notify events instant или daily или off\n/notify types expense,funds,review\n/notify time 19:00\n/notify weekday 0\n/notify quiet 22:00 09:00\n/notify quiet off\nНастройки действуют для выбранного бюджета.")
+        return Reply(f"Уведомления: {self._workspace_name(c)}\nДоставка: {'включена' if pref['enabled'] else 'выключена'}\nЛимиты 80/100%: {pref['budget_alerts']}\nНапоминание: {pref['reminder']}\nНедельный отчёт: {pref['weekly']}\nЕжемесячный отчёт: {pref['monthly']} (1-го числа)\nСобытия: {pref['shared_mode']} ({','.join(pref['event_types'])})\nВремя: {fmt(pref['send_minute'])}, день недели: {pref['weekday']} (0 = пн)\nТихие часы: {fmt(pref['quiet_start'])}–{fmt(pref['quiet_end'])}\nЧасовой пояс — из /settings.\n\n/notify on или off — вся доставка\n/notify budget on\n/notify reminder on\n/notify weekly on\n/notify monthly on или off\n/notify events instant или daily или off\n/notify types expense,funds,review\n/notify time 19:00\n/notify weekday 0\n/notify quiet 22:00 09:00\n/notify quiet off\nНастройки действуют для выбранного бюджета.")

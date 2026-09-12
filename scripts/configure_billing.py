@@ -9,8 +9,11 @@ def configuration(env):
     enabled=env.get('BILLING_ENABLED','false').lower()=='true'
     if not enabled:return {'enabled':False}
     values={'enabled':True,'owner_telegram_id':int(env.get('OWNER_TELEGRAM_ID','0')),'stars':int(env.get('SUBSCRIPTION_STARS','0')),'trial_days':int(env.get('TRIAL_DAYS','7')),'text_quota':int(env.get('TEXT_MONTHLY_QUOTA','0')),'voice_seconds':int(env.get('VOICE_MONTHLY_SECONDS','0')),'image_quota':int(env.get('IMAGE_MONTHLY_QUOTA','0')),'terms_url':env.get('TERMS_URL','').strip(),'support_contact':env.get('SUPPORT_CONTACT','').strip()}
+    for key,env_key,default in [('analysis_quota','ANALYSIS_PERIOD_QUOTA',30),('trial_text_quota','TRIAL_TEXT_QUOTA',100),('trial_voice_seconds','TRIAL_VOICE_SECONDS',300),('trial_image_quota','TRIAL_IMAGE_QUOTA',10),('trial_analysis_quota','TRIAL_ANALYSIS_QUOTA',3)]:
+        values[key]=int(env.get(env_key,str(default)))
+        if values[key]<=0:raise ValueError('Квоты должны быть положительными.')
     if not 0<values['owner_telegram_id']<2**63 or not 1<=values['stars']<=10000 or not 0<=values['trial_days']<=90:raise ValueError('Нужны корректные OWNER_TELEGRAM_ID, SUBSCRIPTION_STARS и TRIAL_DAYS.')
-    if min(values[k] for k in ('text_quota','voice_seconds','image_quota'))<=0:raise ValueError('Задайте положительные месячные квоты AI.')
+    if min(values[k] for k in ('text_quota','voice_seconds','image_quota'))<=0:raise ValueError('Задайте положительные квоты AI на период подписки.')
     url=urlparse(values['terms_url'])
     if url.scheme!='https' or not url.netloc or not values['support_contact']:raise ValueError('Нужны опубликованные HTTPS TERMS_URL и SUPPORT_CONTACT.')
     return values

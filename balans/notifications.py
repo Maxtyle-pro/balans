@@ -6,12 +6,12 @@ from uuid import UUID
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from balans.domain import Reply, money
-from balans.planning import next_allowed, latest_slot
+from balans.planning import next_allowed, latest_slot, monthly_slot
 
 
 class Notifications:
     def _enqueue_notice(self,c,p,kind,text,key,now,entity_kind=None,entity=None):
-        c.execute('INSERT INTO notification_outbox(workspace_id,user_id,telegram_user_id,kind,message,event_key,next_attempt_at,entity_kind,entity_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',(p['workspace_id'],p['user_id'],p['telegram_user_id'],kind,text,key,now,entity_kind,entity))
+        c.execute('INSERT INTO notification_outbox(workspace_id,user_id,telegram_user_id,kind,message,event_key,next_attempt_at,entity_kind,entity_id,expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',(p['workspace_id'],p['user_id'],p['telegram_user_id'],kind,text,key,now,entity_kind,entity,now+timedelta(days=7)))
 
     def plan_notifications(self,now=None):
         now=now or datetime.now(timezone.utc)
@@ -36,6 +36,7 @@ class Notifications:
                     if expiry<=now+timedelta(days=1):
                         status='ended' if expiry<=now else 'ending'
                         message='Доступ завершён. История и экспорт сохранены. /subscription — оплатить.' if status=='ended' else 'Доступ заканчивается в течение суток. Если Stars для продления недостаточно, новые операции будут недоступны. /subscription — проверить подписку.'
+                        if access['status']=='trial' and status=='ending':message='Бесплатный период заканчивается в течение суток. Оплата не подключится автоматически. /subscription — тариф и условия.'
                         self._enqueue_notice(c,p,'billing',message,f'billing:{expiry.isoformat()}:{status}',now,'billing')
                 if p['budget_alerts']:
                     start,end,rows=self._budget_rows(c,now)
@@ -60,6 +61,7 @@ class Notifications:
                             entity_kind='report';entity=report['id']
                         except ValueError:text=prefix+'Недельный отчёт: откройте /report и выберите период или участника.'
                     self._enqueue_notice(c,p,kind,text,key,now,entity_kind,entity)
+                self._plan_monthly(c,p,zone,prefix,now)
                 if p['shared_mode']=='instant':
                     events=c.execute('SELECT * FROM notification_events WHERE workspace_id=current_workspace() AND NOT processed ORDER BY created_at LIMIT 100 FOR UPDATE').fetchall()
                     for e in events:
@@ -71,6 +73,40 @@ class Notifications:
                     if slot>=p['enabled_at'] and not c.execute('SELECT id FROM notification_outbox WHERE event_key=%s',(key,)).fetchone():
                         total=c.execute('WITH done AS (UPDATE notification_events SET processed=true WHERE workspace_id=current_workspace() AND NOT processed AND created_at<=%s AND event_type=ANY(%s) RETURNING id) SELECT count(*) AS n FROM done',(slot,p['event_types'])).fetchone()['n']
                         if total:self._enqueue_notice(c,p,'digest',prefix+f'Новых событий: {total}. Откройте учёт для проверки.',key,now,'reviewqueue')
+
+    def _plan_monthly(self,c,p,zone,prefix,now):
+        if not p['monthly']:return
+        slot=monthly_slot(now,zone,p['send_minute'])
+        if slot<max(p['enabled_at'],p['monthly_enabled_at'] or p['enabled_at']):return
+        end=slot.astimezone(ZoneInfo(zone)).date()-timedelta(days=1)
+        start=end.replace(day=1)
+        key=f"monthly:{p['workspace_id']}:{start.isoformat()}"
+        if c.execute('SELECT id FROM notification_outbox WHERE event_key=%s',(key,)).fetchone():return
+        try:
+            report=self._report_snapshot(c,p['user_id'],f'{start} {end} | currency=all',now)
+            snapshots=report['snapshot'].get('currency_reports',[report['snapshot']])
+            lines=[prefix+f'Итоги месяца {start:%m.%Y}']
+            for snapshot in snapshots:
+                summary=snapshot['summary'];currency=snapshot.get('currency','RUB')
+                lines.append(f"\n{currency}: расходы {money(Decimal(summary['total']),currency)}, доходы {money(Decimal(summary.get('income','0')),currency)}.")
+                for category in summary.get('categories',[])[:3]:
+                    lines.append(f"• {category['name'][:60]}: {money(Decimal(category['total']),currency)}")
+                previous=Decimal(snapshot['previous']['total'])
+                if previous:
+                    lines.append('Изменение расходов к прошлому месяцу: '+money(Decimal(snapshot['delta']),currency)+'.')
+                else:lines.append('Нет записанных расходов прошлого месяца для сравнения.')
+            lines.append('\nПодробности — в отчёте. /notify monthly off — отключить.')
+            self._enqueue_notice(c,p,'monthly','\n'.join(lines),key,now,'report',report['id'])
+        except ValueError:
+            self._enqueue_notice(c,p,'monthly',prefix+f'Итоги месяца {start:%m.%Y}: откройте /report {start:%Y-%m} и выберите более короткий период для подробностей.',key,now,'report')
+
+    def _monthly_settings(self,c):
+        p=self._preference(c)
+        enabled=p['monthly'] and p['enabled']
+        return Reply('Ежемесячный отчёт: '+('включён' if enabled else 'выключен')+'.\n'
+                     'Приходит 1-го числа за предыдущий месяц: расходы, доходы, основные категории и сравнение. '
+                     'Время и тихие часы: /notify. Обычный отчёт не расходует квоту ИИ.',
+                     [[('Отключить' if enabled else 'Включить ежемесячный отчёт','monthlyoff' if enabled else 'monthlyon')],[('Назад','start')]])
 
     def claim_notifications(self,now=None):
         now=now or datetime.now(timezone.utc)
@@ -89,7 +125,7 @@ class Notifications:
             accessible=c.execute('SELECT id FROM workspaces WHERE id=%s',(n['workspace_id'],)).fetchone()
             permitted=p and p['enabled'] and not p['blocked'] and accessible and n['expires_at']>now
             if permitted:
-                permitted= True if n['kind']=='billing' else p['budget_alerts'] if n['kind']=='budget' else p[n['kind']] if n['kind'] in ('reminder','weekly') else p['shared_mode']!='off'
+                permitted= True if n['kind']=='billing' else p['budget_alerts'] if n['kind']=='budget' else p[n['kind']] if n['kind'] in ('reminder','weekly','monthly') else p['shared_mode']!='off'
             if not permitted:
                 c.execute("UPDATE notification_outbox SET state='cancelled' WHERE id=%s",(identity,));return None
             zone=c.execute('SELECT timezone FROM user_settings WHERE user_id=actor_user_id()').fetchone()['timezone']
@@ -106,6 +142,14 @@ class Notifications:
         with self._actor_transaction(actor) as c:c.execute('UPDATE notification_preferences SET blocked=%s WHERE user_id=actor_user_id()',(blocked,))
 
     def _notification_callback(self,c,user,callback,sent):
+        if callback in ('monthlysettings','monthlyon','monthlyoff'):
+            p=self._preference(c)
+            if callback=='monthlyon':
+                c.execute('UPDATE notification_preferences SET monthly_enabled_at=CASE WHEN monthly AND enabled THEN monthly_enabled_at ELSE now() END,monthly=true,enabled=true,enabled_at=CASE WHEN enabled THEN enabled_at ELSE now() END,next_check_at=now() WHERE id=%s',(p['id'],))
+            elif callback=='monthlyoff':
+                c.execute('UPDATE notification_preferences SET monthly=false WHERE id=%s',(p['id'],))
+                c.execute("UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=current_workspace() AND kind='monthly' AND state='pending'")
+            return self._monthly_settings(c)
         if not callback.startswith('nopen:'):return None
         n=c.execute('SELECT * FROM notification_outbox WHERE id=%s',(UUID(callback[6:]),)).fetchone()
         if not n or not c.execute('SELECT id FROM workspaces WHERE id=%s',(n['workspace_id'],)).fetchone():return Reply('Доступ к уведомлению прекращён.')

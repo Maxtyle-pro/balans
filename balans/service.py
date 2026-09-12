@@ -56,6 +56,13 @@ HELP = ('/subscription — подписка и оплата\n/diagnostic — п�
         '/support — поддержка\n/help — помощь\n\n'
         'Можно отправить сумму без команды. Сохранение — только после подтверждения. '
         'Доступны личные и совместные бюджеты, RUB, USD и EUR. /privacy — приватность; /delete — удаление профиля; /exchange — обмен; /fx — ручной курс.')
+QUICK_HELP = ('Как пользоваться Балансом\n\n'
+              '• Напишите «Кофе 250» или «Зарплата 50000».\n'
+              '• Отправьте голосовое сообщение или фото чека.\n'
+              '• Проверьте запись и подтвердите сохранение.\n\n'
+              '/history — ваши записи\n/report — отчёт за месяц\n'
+              '/accounts — счета и остатки\n/workspaces — выбор бюджета\n\n'
+              '/cancel — отменить ввод\n/help — все команды\n/support — поддержка')
 MENU = [[('Добавить расход', 'add'), ('История', 'history')], [('Итог месяца', 'report'), ('Счёт', 'accounts')]]
 
 
@@ -226,7 +233,9 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
             category_reply=self._category_callback(c,user_id,callback)
             if category_reply is not None:
                 return category_reply
-            if callback in ('add', 'history', 'report', 'accounts'):
+            if callback == 'howto':
+                return Reply(QUICK_HELP, [[('Моя подписка','subscription'),('Ежемесячный отчёт','monthlysettings')],[('Назад','start')]])
+            if callback in ('add', 'history', 'report', 'accounts', 'start', 'subscription', 'renewal', 'workspaces'):
                 return self._dispatch(c, user_id, '/' + callback, sent_at, None)
             action, _, raw_id = callback.partition(':')
             if action not in ('save', 'edit', 'cancel'):
@@ -304,7 +313,9 @@ class Service(CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Bi
         category_reply=self._category_command(c,user_id,command,arg)
         if category_reply is not None:
             return category_reply
-        if command in ('/start', '/help'):
+        if command == '/start':
+            return self._welcome(c)
+        if command == '/help':
             intro=c.execute("SELECT value FROM service_content WHERE key='help_intro'").fetchone()
             return Reply(intro['value'] if intro else HELP,MENU,messages=[HELP] if intro else [])
         if command == '/support':

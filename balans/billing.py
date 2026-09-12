@@ -4,13 +4,16 @@ from uuid import UUID
 from psycopg.errors import RaiseException
 from psycopg.types.json import Jsonb
 from balans.domain import Reply
+from balans.onboarding import Onboarding, paid_quotas, DEMO_BADGE
+from balans.billing_demo import BillingDemo
 
 PERIOD=2592000
 
 
-class Billing:
+class Billing(BillingDemo, Onboarding):
     def _billing_gate(self,c):
         info=c.execute('SELECT billing_access() AS data').fetchone()['data']
+        if info['status']=='not_started':return self._trial_card(c)
         if info['status'] in ('expired','suspended'):return Reply('Доступ к новым операциям завершён. /subscription — подписка владельца бюджета; история и экспорт доступны.')
         return None
 
@@ -25,36 +28,103 @@ class Billing:
         try:return super().receive_receipt(*args,**kwargs)
         except RaiseException as exc:return Reply(exc.diag.message_primary)
 
+    def _resolve_receipt(self,*args,**kwargs):
+        try:return super()._resolve_receipt(*args,**kwargs)
+        except RaiseException as exc:return Reply(exc.diag.message_primary,[[('Моя подписка','subscription')]])
+
+    def _resolve_job(self,*args,**kwargs):
+        try:return super()._resolve_job(*args,**kwargs)
+        except RaiseException as exc:return Reply(exc.diag.message_primary,[[('Моя подписка','subscription')]])
+
+    def _resolve_report_job(self,*args,**kwargs):
+        try:return super()._resolve_report_job(*args,**kwargs)
+        except RaiseException as exc:return Reply(exc.diag.message_primary,[[('Моя подписка','subscription')]])
+
     def _subscription_card(self,c):
-        cfg=c.execute('SELECT * FROM billing_config').fetchone();access=c.execute('SELECT billing_access() AS data').fetchone()['data']
-        if not cfg['enabled']:return Reply('Оплата пока не включена. Текущий доступ работает без подписочных ограничений.')
-        labels={'active':'Оплачено','trial':'Пробный период','expired':'Доступ истёк','admin_free':'Бесплатный доступ владельца','suspended':'Доступ приостановлен'}
-        text=f"Подписка: {labels.get(access['status'],access['status'])}\nДоступ до: {access.get('until') or 'без срока'}\nЦена: {cfg['stars']} Stars за 30 дней, автопродление каждые 30 дней.\nПробный период: {cfg['trial_days']} дней.\nЛичные и общие бюджеты, ручной ввод, отчёты; AI в пределах квот.\nКвоты в календарный месяц UTC: текст {cfg['text_quota']}, голос {cfg['voice_seconds']} секунд, изображения/файлы {cfg['image_quota']}.\nОбщий бюджет оплачивает руководитель; квоты расходуются у него.\nОтмена продления сохраняет уже оплаченный период. Возврат прекращает доступ по возвращённому платежу.\nУсловия и возврат: {cfg['terms_url']}\n/paysupport — вопросы оплаты; /renewal — отмена продления."
+        cfg=self._billing_config(c)
+        access=c.execute('SELECT billing_access() AS data').fetchone()['data']
+        labels={'active':'Оплачено','trial':'Пробный период','expired':'Доступ истёк',
+                'admin_free':'Бесплатный доступ владельца','suspended':'Доступ приостановлен',
+                'not_started':'Бесплатный период ещё не начат','disabled':'Оплата пока не включена'}
+        text=(DEMO_BADGE if cfg.get('demo') else '')+'Моя подписка\n'+labels[access['status']]
+        if access.get('until'):text+='\nДоступ до: '+self._local_deadline(c,access['until'])
+        if access['status']=='disabled':
+            return Reply(text+'\nТекущий доступ работает без подписочных ограничений.',[[('Назад','start')]])
+        if cfg['enabled']:
+            text+=f"\n\nТариф: {cfg['stars']} Stars за 30 дней. После оплаты — автопродление каждые 30 дней."
+        if access['status'] in ('trial','active'):
+            usage=c.execute('SELECT billing_usage() AS data').fetchone()['data']
+            text+='\n\nОсталось на текущий период:'
+            for key,label in [('text','ИИ-категоризации'),('image','Страницы чеков / изображения'),('voice','Голос, минут'),('analysis','ИИ-анализы отчётов')]:
+                maximum=access['quotas'][key];remaining=max(0,maximum-usage.get(key,0))
+                text+=f"\n{label}: {remaining / 60:.1f} из {maximum / 60:g}" if key=='voice' else f"\n{label}: {remaining} из {maximum}"
+            if access.get('period_end'):text+='\nКонец периода квот: '+self._local_deadline(c,access['period_end'])
+            text+='\nРучной ввод и обычные отчёты — без отдельной квоты.'
+        if access['status']=='trial':text+='\n\nПосле пробного периода оплату подключаете сами. Автоматического списания нет.'
+        elif access['status']=='expired':text+='\n\nИстория и экспорт доступны.'
+        text+='\nОбщий бюджет использует подписку и квоты владельца.\n/paysupport — вопросы оплаты.'
         buttons=[]
-        if access['status'] not in ('admin_free','suspended'):buttons=[[('Прочитал условия, перейти к оплате',f"billbuy:{cfg['terms_version']}")]]
+        if access['status']=='not_started':buttons.append([(f"Начать {cfg['trial_days']} дней бесплатно",'trialinfo')])
+        if access['status'] not in ('admin_free','suspended'):
+            buttons.append([('Тариф и оплата','billdetails')])
+        rows=c.execute('SELECT id,auto_renew FROM billing_invoices WHERE user_id=actor_user_id() AND first_charge_id IS NOT NULL ORDER BY created_at DESC').fetchall()
+        demo=self._demo_state(c)
+        if demo:
+            rows=[demo] if demo['paid_at'] else []
+            buttons.append([('Тестовый пульт','demopanel')])
+        if rows:buttons.append([('Управлять продлением','renewal')])
+        buttons.append([('Ежемесячный отчёт','monthlysettings'),('Назад','start')])
         return Reply(text,buttons)
 
+    def _payment_details(self,c):
+        from balans.onboarding import quota_text
+        cfg=self._billing_config(c)
+        access=c.execute('SELECT billing_access() AS data').fetchone()['data']
+        if not cfg['enabled'] or access['status'] in ('admin_free','suspended'):return self._subscription_card(c)
+        if not cfg['stars'] or not cfg['terms_url']:return Reply('Условия тарифа ещё не опубликованы. /support — поддержка.',[[('Назад','subscription')]])
+        if access['sponsor']!=str(c.execute('SELECT actor_user_id() AS id').fetchone()['id']):
+            return Reply('Общий бюджет оплачивает его владелец. Для личной подписки сначала выберите личный бюджет.',[[('Мои бюджеты','workspaces')],[('Назад','subscription')]])
+        payment_button=f"demobuy:{cfg['demo_generation']}" if cfg.get('demo') else f"billbuy:{cfg['terms_version']}"
+        return Reply((DEMO_BADGE if cfg.get('demo') else '')+f"Подписка: {cfg['stars']} Stars за 30 дней с автопродлением каждые 30 дней.\n\n"
+                     f"Включено: {quota_text(paid_quotas(cfg))}. Квоты обновляются в начале оплаченного периода.\n"
+                     'Ручной ввод и обычные отчёты — без отдельной квоты. Общий бюджет оплачивает владелец.\n'
+                     'Оплата подключается сразу. Отмена продления сохраняет оплаченный срок; возврат прекращает доступ по возвращённому платежу.\n'
+                     f"Условия и возврат: {cfg['terms_url']}\n/paysupport — поддержка оплаты.",
+                     [[('Прочитал условия, перейти к оплате',payment_button)],[('Назад','subscription')]])
+
     def _billing_command(self,c,user,command,arg,sent):
+        demo=self._demo_command(c,user,command,arg,sent)
+        if demo is not None:return demo
         if command in ('/subscription','/subscribe'):return self._subscription_card(c)
         if command=='/paysupport':
             cfg=c.execute('SELECT support_contact FROM billing_config').fetchone()
             return Reply((cfg['support_contact'] or self.support or 'Поддержка оплаты пока не настроена.')+'\nВопросы оплаты решает владелец сервиса, не поддержка Telegram.')
         if command=='/terms':return Reply(c.execute('SELECT terms_url FROM billing_config').fetchone()['terms_url'] or 'Условия оплаты ещё не опубликованы; приём платежей выключен.')
         if command=='/renewal':
+            if self._demo_state(c):return self._demo_renewal(c)
             rows=c.execute('SELECT id,first_charge_id,auto_renew FROM billing_invoices WHERE user_id=%s AND first_charge_id IS NOT NULL ORDER BY created_at DESC LIMIT 10',(user,)).fetchall()
             return Reply('Продление подписок. Отмена сохраняет оплаченный срок.',[[('Отменить автопродление' if r['auto_renew'] else 'Возобновить автопродление',f"billrenew:{r['id']}:{0 if r['auto_renew'] else 1}")] for r in rows])
         return None
 
     def _billing_callback(self,c,user,callback,sent):
+        demo=self._demo_callback(c,user,callback,sent)
+        if demo is not None:return demo
+        if self._demo_enabled(c) and callback.startswith(('billbuy:','billrenew:')):
+            return Reply(DEMO_BADGE+'Эта кнопка относится к настоящей оплате. Откройте тестовый тариф.',[[('Моя подписка','subscription')]])
+        onboarding=self._onboarding_callback(c,user,callback,sent)
+        if onboarding is not None:return onboarding
+        if callback=='billdetails':return self._payment_details(c)
         if callback.startswith('billbuy:'):
             cfg=c.execute('SELECT * FROM billing_config').fetchone()
-            if not cfg['enabled'] or int(callback.split(':')[1])!=cfg['terms_version']:return Reply('Условия изменились или оплата выключена. /subscription')
+            if not cfg['enabled'] or not cfg['stars'] or not cfg['terms_url'] or int(callback.split(':')[1])!=cfg['terms_version']:return Reply('Условия изменились или оплата выключена. /subscription')
+            access=c.execute('SELECT billing_access() AS data').fetchone()['data']
+            if access['sponsor']!=str(user) or access['status'] in ('admin_free','suspended'):return self._payment_details(c)
             # One live subscription per user. Shared participants purchase only their own access.
             existing=c.execute('SELECT id FROM billing_invoices WHERE user_id=%s AND (expires_at>now() AND first_charge_id IS NULL OR auto_renew AND first_charge_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1',(user,)).fetchone()
             if existing:
                 paid=c.execute('SELECT first_charge_id FROM billing_invoices WHERE id=%s',(existing['id'],)).fetchone()
                 return Reply('Уже есть подписка с автопродлением. /renewal — управление.') if paid['first_charge_id'] else Reply('Счёт на оплату',invoice_id=str(existing['id']))
-            row=c.execute('INSERT INTO billing_invoices(user_id,telegram_user_id,stars,terms_version,terms_url,quotas) VALUES(%s,actor_telegram_id(),%s,%s,%s,%s) RETURNING id',(user,cfg['stars'],cfg['terms_version'],cfg['terms_url'],Jsonb({'text':cfg['text_quota'],'voice':cfg['voice_seconds'],'image':cfg['image_quota']}))).fetchone()
+            row=c.execute('INSERT INTO billing_invoices(user_id,telegram_user_id,stars,terms_version,terms_url,quotas) VALUES(%s,actor_telegram_id(),%s,%s,%s,%s) RETURNING id',(user,cfg['stars'],cfg['terms_version'],cfg['terms_url'],Jsonb(paid_quotas(cfg)))).fetchone()
             return Reply('Счёт на оплату',invoice_id=str(row['id']))
         if callback.startswith('billrenew:'):
             _,identity,enabled=callback.split(':');identity=UUID(identity)
@@ -66,6 +136,7 @@ class Billing:
 
     def prepare_invoice(self,actor,identity):
         with self._actor_transaction(actor) as c:
+            if self._demo_enabled(c):return None
             cfg=c.execute('SELECT enabled FROM billing_config').fetchone()
             row=c.execute('SELECT * FROM billing_invoices WHERE id=%s AND expires_at>now() AND first_charge_id IS NULL',(UUID(identity),)).fetchone()
             return row if cfg['enabled'] else None
@@ -77,6 +148,7 @@ class Billing:
         try:identity=UUID(payload)
         except ValueError:return False
         with self._actor_transaction(actor) as c:
+            if self._demo_enabled(c):return False
             cfg=c.execute('SELECT enabled FROM billing_config').fetchone()
             invoice=c.execute('SELECT * FROM billing_invoices WHERE id=%s FOR UPDATE',(identity,)).fetchone()
             if not cfg['enabled'] or not invoice or invoice['telegram_user_id']!=actor or currency!='XTR' or total!=invoice['stars'] or invoice['first_charge_id'] or invoice['expires_at']<=datetime.now(timezone.utc):return False
@@ -110,7 +182,9 @@ class Billing:
             return Reply('Возврат Stars учтён. Доступ по этому платежу прекращён; /subscription — статус.' if row['refunded'] else f'Оплата подтверждена: {invoice["stars"]} Stars. Доступ по платежу до {end:%d.%m.%Y %H:%M} UTC. /subscription')
 
     def renewal_details(self,actor,identity):
-        with self._actor_transaction(actor) as c:return c.execute('SELECT * FROM billing_invoices WHERE id=%s AND first_charge_id IS NOT NULL',(UUID(identity),)).fetchone()
+        with self._actor_transaction(actor) as c:
+            if self._demo_enabled(c):return None
+            return c.execute('SELECT * FROM billing_invoices WHERE id=%s AND first_charge_id IS NOT NULL',(UUID(identity),)).fetchone()
 
     def record_renewal(self,actor,identity,enabled):
         with self._actor_transaction(actor) as c:
