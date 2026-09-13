@@ -64,7 +64,7 @@ def render_detailed(snapshot,sources,files):
         subtitle=f"{date.fromisoformat(row['date']):%d.%m.%Y} · {sign}{fmt(row['amount'])} {symbol}"
         if kind=='expense':subtitle+=' · '+row['category']
         else:subtitle+=' · '+{'income':'Доход','opening':'Начальный остаток','refund':'Возврат'}.get(kind,'Операция')
-        story.append(KeepTogether([Spacer(1,12),p(title,heading),p(subtitle),p('Источник: '+info['label'],small)]))
+        story.extend([Spacer(1,12),p(title,heading),p(subtitle),p('Источник: '+info['label'],small)])
         if int(row.get('revision',1))>1:story.append(p('Запись изменена пользователем. Показаны данные на момент формирования отчёта.',small))
         if info['text']:story += [p('Распознанная речь' if info['label']=='Голосовое сообщение' else 'Сохранённый текст сообщения',small),p(info['text'])]
         elif not info['files']:story.append(p('Исходное сообщение не сохранилось.',small))
