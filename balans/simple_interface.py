@@ -6,7 +6,7 @@ MAIN_BUTTONS=[
  [('➖ Расход','add'),('➕ Доход','ui:go:income')],
  [('📋 История','history'),('📊 Отчёт','report')],
  [('💰 Баланс','balance'),('⚙️ Настройки','ui:go:settings')],
- [('⭐ Подписка','subscription'),('💡 Помощь','howto')],
+ [('⭐ Подписка','subscription')],
  [('✉️ Написать разработчику','ui:go:contact')]]
 
 HIDDEN_ACTIONS={'sheets','sheets_connect','sheets_off','account','accounts','transfer','exchange','fx','workspaces','workspace','invite','join','members','funds','issue','returnfunds','claim','receive','reconcile','dispute','docs','attach','review','reviewqueue','correction','docaudit','docdelete','docdeleteconfirm','docquota','docquota_set','docpolicy','docpolicy_set','periodclose','periodopen','diagnostic'}
@@ -24,7 +24,6 @@ class SimpleInterface(CategorySettings):
             [('💱 Валюта','currencysettings'),('🕒 Часовой пояс','ui:go:settings_zone')],
             [('💰 Начальный остаток','ui:go:opening')],
             [('🏷 Категории','ui:go:categories')],
-            [('📎 Мои файлы','ui:go:files')],
             [('🗑 Очистить историю','historyclear')],
             [('Сохранение: '+('автоматически' if self._capture_enabled(c) else 'с подтверждением'),'captureoff' if self._capture_enabled(c) else 'captureon')],
             [('← Главное меню','ui:menu')]])
