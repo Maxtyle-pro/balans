@@ -138,7 +138,7 @@ class Reports:
             if not report:return Reply('Отчёт недоступен или истёк. /report — создать новый.')
         snapshot=report['snapshot']
         data=render_pdf(snapshot) if format=='pdf' else csv_bytes(snapshot)
-        return Reply(f"Отчёт {snapshot['start']} — {snapshot['end']}. Снимок учётных данных.",generated_document=base64.b64encode(data).decode(),generated_filename=f"balans-{snapshot['start']}-{snapshot['end']}.{format}")
+        return Reply('',generated_document=base64.b64encode(data).decode(),generated_filename=f"balans-{snapshot['start']}-{snapshot['end']}.{format}")
 
     def _resolve_sheets_connection(self,actor,identity):
         return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])

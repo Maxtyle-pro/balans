@@ -177,6 +177,8 @@ def test_generated_document_transport(reporting):
              'chat':{'id':user,'type':'private'},'from':{'id':user,'is_bot':False,'first_name':'Test'}}
     update=Update.model_validate({'update_id':900001,'message':message})
     asyncio.run(process_update(bot,s,update))
+    assert not bot.messages
+    assert len(bot.documents)==1
     assert bot.documents[0].filename.endswith('.pdf')
     assert bot.documents[0].data.startswith(b'%PDF')
     assert 'За этот период записей' in ''.join(page.extract_text() for page in PdfReader(BytesIO(bot.documents[0].data)).pages)
