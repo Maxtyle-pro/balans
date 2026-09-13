@@ -186,7 +186,7 @@ def test_provider_failure_explicit_retry(receipts,database):
     assert len(ai.calls)==2
 
 
-@pytest.mark.parametrize('action',['/cancel','/receipts off'])
+@pytest.mark.parametrize('action',['/cancel'])
 def test_late_ocr_cancelled(receipts,database,action):
     s,ai,_=receipts;user=next(USERS)
     collection=upload(s,user);entered=Event();release=Event();original=ai.extract

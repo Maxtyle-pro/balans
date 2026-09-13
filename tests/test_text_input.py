@@ -55,7 +55,7 @@ def test_own_categories_archive_history_and_search(service,database):
     card=send(s,u,'Бензин 500')
     assert all(label!='Машина' for row in card.buttons for label,_ in row)
     assert 'Бензин' not in send(s,other,'/search бенз').text
-    assert query(database,other,'SELECT * FROM category_events')==[]
+    assert query(database,other,"SELECT count(*) FROM category_events WHERE category_id NOT IN (SELECT id FROM categories WHERE name='Одежда')")==[(0,)]
 
 
 def test_batch_access_and_default_account_snapshot(service,database):

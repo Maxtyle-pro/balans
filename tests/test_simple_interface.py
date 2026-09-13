@@ -67,3 +67,15 @@ def test_addressed_sheets_command_cannot_connect(service,database):
     for command in ('/sheets@balans_bot connect test','/SHEETS connect test'):
         assert 'отключено' in send(s,u,command).text
     assert query(database,u,'SELECT count(*) FROM sheets_connections')==[(0,)]
+
+
+def test_automatic_features_have_no_settings_switches(service):
+    u=next(USERS)
+    enable(service,u)
+    settings=send(service,u,callback='ui:go:settings')
+    labels=' '.join(label for row in settings.buttons for label,_ in row)
+    assert 'Уведомления' not in labels and 'Распознавание' not in labels
+    for cb in ('ui:section:recognition','ui:go:ai','ui:go:voice','ui:go:receipts','monthlysettings','monthlyoff','ui:go:notify','ui:go:notify_off','ai_off'):
+        r=send(service,u,callback=cb)
+        assert r.buttons==[[('☰ Меню','ui:menu')]]
+        assert 'автоматически' in r.text

@@ -120,7 +120,7 @@ def test_isolation_and_duplicate(voices,database):
     assert len(query(database,user,'SELECT * FROM postings'))==2
 
 
-@pytest.mark.parametrize('cancel',['/cancel','/voice off'])
+@pytest.mark.parametrize('cancel',['/cancel'])
 def test_late_result_and_busy(voices,database,cancel):
     s,ai=voices;user=next(USERS);entered=Event();release=Event()
     original=ai.extract

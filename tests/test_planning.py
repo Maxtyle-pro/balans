@@ -1,14 +1,22 @@
 from datetime import datetime,timezone,timedelta,date
 from itertools import count
 from balans.planning import budget_period,next_allowed,latest_slot
-from test_service import send,query,draft,NOW
+from test_service import send as user_send,query,draft,NOW
 from test_funds import setup,issue
 from test_receipts import button
 
 USERS=count(140000000)
 
+# Exercise retained scheduler internals; notification switches are no longer public UI.
+def send(s,user,text='',**kwargs):
+    if text.startswith('/notify '):
+        user_send(s,user,'/start')
+        with s._actor_transaction(user) as c:
+            return s._planning_command(c,c.execute('SELECT actor_user_id() AS id').fetchone()['id'],'/notify',text[8:],NOW)
+    return user_send(s,user,text,**kwargs)
+
 def ready(s,user):
-    send(s,user,'/notify on');send(s,user,'/notify quiet off')
+    send(s,user,'/notify on');send(s,user,'/notify quiet off');send(s,user,'/notify budget on')
 
 def test_period_and_quiet_dst():
     assert budget_period(date(2026,1,3),5)==(date(2025,12,5),date(2026,1,4))
@@ -23,7 +31,7 @@ def test_period_and_quiet_dst():
 
 def test_budget_threshold_once_and_optin(service,database):
     s=service;u=next(USERS)
-    send(s,u,'/budget 1000');send(s,u,callback=draft(s,u,'850'))
+    send(s,u,'/notify off');send(s,u,'/budget 1000');send(s,u,callback=draft(s,u,'850'))
     s.plan_notifications(NOW+timedelta(seconds=1))
     assert not query(database,u,'SELECT * FROM budget_alerts')
     ready(s,u);s.plan_notifications(NOW+timedelta(minutes=60))

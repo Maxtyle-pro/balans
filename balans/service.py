@@ -262,7 +262,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             if category_reply is not None:
                 return category_reply
             if callback == 'howto':
-                return Reply(QUICK_HELP, [[('Моя подписка','subscription'),('Ежемесячный отчёт','monthlysettings')],[('☰ Все действия','ui:menu')],[('Назад','start')]])
+                return Reply(QUICK_HELP, [[('Моя подписка','subscription')],[('☰ Меню','ui:menu')],[('Назад','start')]])
             if callback in ('add', 'history', 'report', 'accounts', 'start', 'subscription', 'renewal', 'workspaces'):
                 return self._dispatch(c, user_id, '/' + callback, sent_at, None)
             action, _, raw_id = callback.partition(':')

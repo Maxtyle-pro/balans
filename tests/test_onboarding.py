@@ -117,11 +117,13 @@ def test_monthly_timezone_year_boundary():
     assert monthly_slot(now+timedelta(hours=1),'Europe/Moscow',9*60)==datetime(2027,1,1,6,tzinfo=timezone.utc)
 
 
-def test_monthly_report_dedup_and_optout(service,database):
+def test_monthly_report_dedup_and_always_enabled(service,database):
     s=service;u=next(USERS)
     send(s,u,'/start')
     assert not query(database,u,'SELECT id FROM notification_preferences')
-    send(s,u,callback='monthlyon');send(s,u,'/notify quiet off')
+    with s._actor_transaction(u) as c:
+        s._preference(c)
+        c.execute('UPDATE notification_preferences SET quiet_start=NULL,quiet_end=NULL WHERE user_id=actor_user_id()')
     now=datetime.now(timezone.utc)
     with s._actor_transaction(u) as c:
         c.execute("UPDATE notification_preferences SET enabled_at=now()-interval '40 days',monthly_enabled_at=now()-interval '40 days',send_minute=0,next_check_at=now()-interval '1 minute' WHERE user_id=actor_user_id()")
@@ -132,7 +134,7 @@ def test_monthly_report_dedup_and_optout(service,database):
     assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3))
     assert 'Расходы:' in send(s,u,callback=f"nopen:{notice['id']}").text
     send(s,u,callback='monthlyoff')
-    assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3)) is None
+    assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3)) is not None
     assert query(database,u,"SELECT count(*) FROM report_jobs WHERE kind='analysis'")==[(0,)]
 
 

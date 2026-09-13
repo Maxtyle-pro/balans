@@ -1,5 +1,6 @@
 """Personal finance navigation: one balance, no account management screens."""
 from balans.domain import Reply,money
+from balans.category_settings import CategorySettings
 
 MAIN_BUTTONS=[
  [('➖ Расход','add'),('➕ Доход','ui:go:income')],
@@ -12,7 +13,7 @@ HIDDEN_ACTIONS={'sheets','sheets_connect','sheets_off','account','accounts','tra
 
 TIMEZONES={'Europe/Moscow':'Москва · UTC+3','Europe/London':'Лондон','Europe/Paris':'Париж','Asia/Dubai':'Дубай · UTC+4','Asia/Yekaterinburg':'Екатеринбург · UTC+5','Asia/Novosibirsk':'Новосибирск · UTC+7','Asia/Vladivostok':'Владивосток · UTC+10','America/New_York':'Нью-Йорк','UTC':'UTC'}
 
-class SimpleInterface:
+class SimpleInterface(CategorySettings):
     def _ui_menu(self,c,section=''):
         if section in ('preferences','privacy'):return self._simple_settings(c)
         return Reply('💰 Баланс\n\nОтправьте текст, голосовое, фото или документ — я запишу операцию.\nИли выберите действие:',MAIN_BUTTONS)
@@ -22,9 +23,9 @@ class SimpleInterface:
         return Reply('⚙️ Настройки\n\nВалюта: '+self._account_context(c)['currency']+'\nЧасовой пояс: '+TIMEZONES.get(row['timezone'],row['timezone'])+'\nЗаписи: '+('сохраняются автоматически' if self._capture_enabled(c) else 'сохраняются после подтверждения'),[
             [('💱 Валюта','currencysettings'),('🕒 Часовой пояс','ui:go:settings_zone')],
             [('💰 Начальный остаток','ui:go:opening')],
-            [('🏷 Категории','ui:go:categories'),('🔔 Уведомления','ui:go:notify')],
-            [('🤖 Распознавание','ui:section:recognition')],
-            [('📎 Мои файлы','ui:go:files'),('🔒 Приватность','ui:go:privacy')],
+            [('🏷 Категории','ui:go:categories')],
+            [('📎 Мои файлы','ui:go:files')],
+            [('🗑 Очистить историю','historyclear')],
             [('Сохранение: '+('автоматически' if self._capture_enabled(c) else 'с подтверждением'),'captureoff' if self._capture_enabled(c) else 'captureon')],
             [('← Главное меню','ui:menu')]])
 
@@ -34,6 +35,20 @@ class SimpleInterface:
         return Reply(text+'\n\nПо внесённым доходам, расходам и начальному остатку.',[[('➕ Доход','ui:go:income'),('➖ Расход','add')],[('Начальный остаток','ui:go:opening')],[('← Главное меню','ui:menu')]],command_hints=False)
 
     def _simple_entry(self,c,user,text,sent,callback):
+        category=self._category_settings_entry(c,user,text,callback)
+        if category is not None:return category
+        if callback=='historyclear':
+            row=c.execute("INSERT INTO history_clear_requests(user_id,workspace_id) SELECT %s,id FROM workspaces WHERE owner_user_id=%s AND kind='personal' RETURNING id",(user,user)).fetchone()
+            return Reply('⚠️ Очистить всю историю?\n\nБудут удалены все расходы, доходы, начальный остаток, отчёты и загруженные фото, чеки и документы. Файлы будут удалены из хранилища бота.\n\nВосстановить историю в боте нельзя. Подписка, настройки и использованный лимит ИИ сохранятся. Сообщения в Telegram останутся.\n\nСначала скачайте нужные отчёты и файлы.',[[('Отмена','ui:go:settings')],[('🗑 Удалить всю историю',f"historyclearconfirm:{row['id']}")]])
+        if callback and callback.startswith('historyclearconfirm:'):
+            from uuid import UUID
+            c.execute('SELECT clear_personal_history(%s)',(UUID(callback.split(':')[1]),))
+            return Reply('✅ История очищена. Баланс обнулён. Загруженные файлы поставлены на удаление.\nМожно записывать новые операции.',MAIN_BUTTONS)
+        command=text.split(maxsplit=1)[0].split('@')[0].lower() if text.strip() else ''
+        if command=='/notify' or callback and (callback in ('monthlysettings','monthlyon','monthlyoff','ui:go:notify') or callback.startswith('ui:go:notify_')):
+            return Reply('🔔 Ежемесячный отчёт, предупреждения о лимите ИИ и сроке хранения файлов приходят автоматически.',[[('☰ Меню','ui:menu')]])
+        if (command=='/ai' or command in ('/voice','/receipts') and text.split()[1:]==['off']) or callback and (callback=='ui:section:recognition' or callback in ('ui:go:ai','ui:go:voice','ui:go:receipts','ai_off') or callback in ('ui:go:ai_off','ui:go:voice_off','ui:go:receipts_off')):
+            return Reply('Отправьте текст, голосовое, фото или документ — распознавание работает автоматически.',[[('☰ Меню','ui:menu')]])
         if callback=='ui:go:settings_zone':
             c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
             return Reply('🕒 Выберите часовой пояс по городу:',[[(label,'tz:'+zone)] for zone,label in TIMEZONES.items()]+[[('← Настройки','ui:go:settings')]])

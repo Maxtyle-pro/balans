@@ -64,7 +64,7 @@ for key,label,command,prompt in [
     ('report_period','Выбрать период','/report','За какой период нужен отчёт? Например: август — в формате 2026-08, либо 01.08.2026 15.08.2026.'),
     ('budget_set','Установить лимит','/budget','Введите сумму лимита. Для категории: 10000 | Продукты.'),
     ('settings_zone','Изменить часовой пояс','/settings','Введите часовой пояс. Например: Europe/Moscow или Asia/Yekaterinburg.'),
-    ('categories_add','Добавить категорию','/categories add','Как назвать категорию?'),
+    ('categories_add','➕ Добавить категорию','/categories add','Как назвать категорию?'),
     ('categories_rename','Переименовать категорию','/categories rename','Введите прежнее и новое названия через «|».'),
     ('categories_archive','Скрыть категорию','/categories archive','Введите название категории, которую нужно скрыть.'),
     ('sheets_connect','Подключить таблицу','/sheets connect','Пришлите ссылку на свою Google-таблицу.'),
@@ -93,7 +93,7 @@ SECTIONS={
  'preferences':('⚙️ Настройки',['settings','settings_zone','categories','categories_add','categories_rename','categories_archive','rules','rule','category','ai','receipts','voice','notify']),
  'subscription':('⭐ Подписка',['subscription','renewal','terms','paysupport']),
  'privacy':('🔒 Приватность и помощь',['files','privacy','retention','delete','support','diagnostic'])}
-EXTRAS={'budget':['budget_set','budgetday'],'settings':['settings_zone'],'categories':['categories_add','categories_rename','categories_archive'],
+EXTRAS={'budget':['budget_set','budgetday'],'settings':['settings_zone'],
  'notify':['notify_on','notify_off','notify_monthly','notify_monthly_off','notify_weekly','notify_weekly_off','notify_reminder','notify_reminder_off','notify_budget','notify_budget_off','notify_time','notify_quiet'],
  'ai':['ai_on','ai_off'],'voice':['voice_on','voice_off'],'receipts':['receipts_on','receipts_off'],
  'retention':['retention_on','retention_off'],'sheets':['sheets_connect','sheets_off'],'docquota':['docquota_set'],'docpolicy':['docpolicy_set']}
@@ -208,5 +208,5 @@ class CommandUI(HistoryUI):
         if not text.strip():return Reply(ACTIONS[pending['action']].prompt)
         c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
         reply=self._dispatch(c,user,('/support' if pending['action']=='contact' else ACTIONS[pending['action']].command)+' '+text.strip(),sent,None)
-        reply.buttons+=buttons([pending['action']])
+        if not pending['action'].startswith('categories_'):reply.buttons+=buttons([pending['action']])
         return reply

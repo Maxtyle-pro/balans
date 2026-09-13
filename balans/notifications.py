@@ -98,7 +98,7 @@ class Notifications:
                 if previous:
                     lines.append('Изменение расходов к прошлому месяцу: '+money(Decimal(snapshot['delta']),currency)+'.')
                 else:lines.append('Нет записанных расходов прошлого месяца для сравнения.')
-            lines.append('\nПодробности — в отчёте. /notify monthly off — отключить.')
+            lines.append('\nПодробности — в отчёте.')
             self._enqueue_notice(c,p,'monthly','\n'.join(lines),key,now,'report',report['id'])
         except ValueError:
             self._enqueue_notice(c,p,'monthly',prefix+f'Итоги месяца {start:%m.%Y}: откройте /report {start:%Y-%m} и выберите более короткий период для подробностей.',key,now,'report')

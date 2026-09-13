@@ -74,13 +74,8 @@ def test_missing_source_delivery_keeps_bot_running():
     assert 'Данные расхода сохранены' in bot.messages[-1][0]
 
 
-def test_explicit_receipts_off_and_on(receipts):
+def test_receipt_recognition_stays_enabled(receipts):
     s,_,_=receipts;user=next(USERS);bot=MediaBot(photo_bytes())
-    send(s,user,'/receipts off')
-    asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
-    assert bot.downloads==0
-    assert '/receipts on' not in bot.messages[-1][0]
-    assert any(b.text=='Включить чеки' for row in bot.messages[-1][1]['reply_markup'].inline_keyboard for b in row)
-    send(s,user,'/receipts on')
+    assert 'автоматически' in send(s,user,'/receipts off').text
     asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
     assert bot.downloads==1

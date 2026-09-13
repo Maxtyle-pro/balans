@@ -93,7 +93,7 @@ def test_auto_flow_and_durable_replay(ai_service,database):
     assert query(database,user,'SELECT state,prompt_version,input_tokens FROM ai_jobs')==[('succeeded','category-v1',20)]
 
 
-def test_no_key_and_no_consent(service,ai_service,database):
+def test_no_key_and_automatic_recognition(service,ai_service,database):
     user=next(users)
     send(service,user,'/ai on')
     send(service,user,'/add 250')
@@ -101,9 +101,9 @@ def test_no_key_and_no_consent(service,ai_service,database):
     s,ai=ai_service
     other=next(users)
     send(s,other,'/add 250')
-    assert 'AI выключен' in send(s,other,'Кофе').text
-    assert not ai.calls
-    assert query(database,other,'SELECT ai_enabled FROM user_settings')==[(False,)]
+    assert 'AI предлагает' in send(s,other,'Кофе').text
+    assert len(ai.calls)==1
+    assert query(database,other,'SELECT ai_enabled FROM user_settings')==[(True,)]
 
 
 def test_correction_requires_opt_in_and_is_private(ai_service,database):
@@ -213,7 +213,7 @@ def test_failed_ai_is_cached_and_manual_still_saves(ai_service,database):
     assert query(database,user,'SELECT count(*) FROM operations')==[(1,)]
 
 
-@pytest.mark.parametrize('during',['/cancel','/category Дом','/ai off'])
+@pytest.mark.parametrize('during',['/cancel','/category Дом'])
 def test_late_result_never_overwrites_user_action(ai_service,database,during):
     service,ai=ai_service
     user=next(users)

@@ -27,6 +27,8 @@ def migrate(dsn: str, runtime_role: str) -> None:
             conn.execute(source)
             conn.execute("INSERT INTO public.schema_migrations VALUES (%s,%s)", (path.name, checksum))
         role = sql.Identifier(runtime_role)
+        conn.execute(sql.SQL("GRANT SELECT,INSERT,UPDATE ON balans.history_clear_requests TO {}").format(role))
+        conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION balans.clear_personal_history(uuid) TO {}").format(role))
         conn.execute(sql.SQL("REVOKE EXECUTE ON FUNCTION balans.schedule_retention_before_text(),balans.billing_access_live(uuid) FROM {}").format(role))
         conn.execute(sql.SQL("GRANT UPDATE(enabled,generation,trial_started_at,trial_until,trial_quotas,paid_at,paid_until,paid_quotas,checkout_id,checkout_at,checkout_state,auto_renew) ON balans.billing_demo TO {}").format(role))
         conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION balans.billing_usage() TO {}").format(role))

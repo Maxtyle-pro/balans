@@ -114,8 +114,7 @@ class InputFlow:
                 except RaiseException as exc:raise ValueError(exc.diag.message_primary) from None
             page=int(arg) if arg.isdigit() else 1
             if not 1<=page<=10000:raise ValueError('Номер страницы: от 1 до 10000.')
-            rows=c.execute('SELECT name,archived FROM categories ORDER BY archived,name LIMIT 30 OFFSET %s',((page-1)*30,)).fetchall()
-            return Reply('Категории\n'+'\n'.join(r['name']+(' (архив)' if r['archived'] else '') for r in rows)+'\n\n/categories add Название\n/categories rename Старое | Новое\n/categories archive Название\n/categories restore Название\nСледующая страница: /categories 2. Использованные категории остаются в истории; архив исключает их из нового выбора.')
+            return self._category_settings(c,page)
         if command=='/search' or (command=='/history' and '=' in arg):
             filters={};term='';page=1
             if command=='/search':
