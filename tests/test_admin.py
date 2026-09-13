@@ -15,11 +15,15 @@ SECRET='JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 @pytest.fixture
 def admin(database):
     actor=next(USERS)
-    with psycopg.connect(database[0]) as c:c.execute("INSERT INTO balans.admin_roles VALUES(%s,'owner',true)",(actor,))
+    with psycopg.connect(database[0]) as c:
+        c.execute("UPDATE balans.admin_roles SET active=false WHERE telegram_user_id=294966057")
+        c.execute("INSERT INTO balans.admin_roles VALUES(%s,'owner',true)",(actor,))
     s=Service(database[1],admin_config=AdminConfig(True,'http://127.0.0.1:8088',{actor:SECRET}));send(s,actor,'/start')
     yield s,actor
     s.close()
-    with psycopg.connect(database[0]) as c:c.execute('UPDATE balans.admin_roles SET active=false WHERE telegram_user_id=%s',(actor,))
+    with psycopg.connect(database[0]) as c:
+        c.execute('UPDATE balans.admin_roles SET active=false WHERE telegram_user_id=%s',(actor,))
+        c.execute('UPDATE balans.admin_roles SET active=true WHERE telegram_user_id=294966057')
 
 
 def test_login_one_time_totp_and_role_revocation(admin,database):

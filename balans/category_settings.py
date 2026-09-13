@@ -4,7 +4,7 @@ from balans.domain import Reply
 
 ICONS={'Одежда':'👕','Дом':'🏠','Другое':'📦','Без категории':'⚠️','Здоровье':'💊','Кафе и рестораны':'☕','Покупки':'🛍','Продукты':'🛒','Развлечения':'🎉','Транспорт':'🚕'}
 
-def label(name):return ICONS.get(name,'🏷')+' '+name
+def label(name):return (ICONS[name]+' ' if name in ICONS else '')+name
 
 class CategorySettings:
     def _category_settings(self,c,page=1,mode='list'):
@@ -43,7 +43,7 @@ class CategorySettings:
             if not row:return Reply('Категория недоступна.',[[('← К списку','ui:go:categories')]])
             if mode=='rename':
                 c.execute("INSERT INTO ui_inputs(user_id,workspace_id,action) VALUES(%s,current_workspace(),%s) ON CONFLICT(user_id) DO UPDATE SET action=excluded.action,workspace_id=excluded.workspace_id,expires_at=now()+interval '30 minutes'",(user,'catrename:'+identity))
-                return Reply('✏️ '+label(row['name'])+'\n\nНапишите новое название.',[[('Отмена','ui:go:categories')]],command_hints=False)
+                return Reply('✏️ '+label(row['name'])+'\n\nНапишите новое название. Можно добавить свой эмодзи, например «🐶 Питомцы».',[[('Отмена','ui:go:categories')]],command_hints=False)
             if mode in ('archive','restore'):
                 c.execute('SELECT manage_category(%s,%s)',(mode,row['name']))
                 return self._category_settings(c)

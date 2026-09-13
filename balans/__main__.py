@@ -7,7 +7,7 @@ import os
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
-from aiogram.types import BufferedInputFile, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import BufferedInputFile, BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 import psycopg
 
@@ -17,6 +17,7 @@ from balans.notifications import notification_loop
 from balans.support_delivery import support_loop
 from balans.inbox import inbox_loop
 from balans.admin_web import start_admin
+from balans.admin_service import STATISTICS_OWNER_ID
 from balans.privacy import privacy_loop
 from balans.ai import CategoryAI
 from balans.receipt_media import BoundedBuffer, MAX_FILE_BYTES, MediaError
@@ -207,6 +208,10 @@ async def main():
                 admin_runner=None;webhook_runner=None;inboxes=[];background=[]
                 try:
                     await bot.set_my_commands([BotCommand(command=c,description=d) for c,d in COMMANDS])
+                    if await asyncio.to_thread(service.statistics_owner_enabled):
+                        await bot.set_my_commands([BotCommand(command=c,description=d) for c,d in COMMANDS]+[BotCommand(command='stats',description='Статистика бота')],scope=BotCommandScopeChat(chat_id=STATISTICS_OWNER_ID))
+                    else:
+                        await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=STATISTICS_OWNER_ID))
                     admin_runner=await start_admin(service,bot)
                     if mode=='webhook':webhook_runner=await start_webhook(bot,service,process_update)
                     background=[asyncio.create_task(privacy_loop(service)),asyncio.create_task(notification_loop(bot,service)),asyncio.create_task(support_loop(bot,service))]

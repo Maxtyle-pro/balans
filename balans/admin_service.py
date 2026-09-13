@@ -4,12 +4,34 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 from balans.domain import Reply
 
+STATISTICS_OWNER_ID=294966057
+
 class AdminService:
+    def statistics_owner_enabled(self):
+        with self._actor_transaction(STATISTICS_OWNER_ID) as c:
+            return c.execute("SELECT admin_role() AS role").fetchone()['role']=='owner'
+
+    def _owner_statistics(self,c):
+        identity=c.execute('SELECT actor_telegram_id() AS id,admin_role() AS role').fetchone()
+        if identity['id']!=STATISTICS_OWNER_ID or identity['role']!='owner':
+            return Reply('Команда недоступна.',command_hints=False)
+        users=c.execute("""SELECT count(*) AS total,
+            count(*) FILTER(WHERE created_at>now()-interval '7 days') AS new,
+            count(*) FILTER(WHERE last_seen>now()-interval '24 hours') AS day,
+            count(*) FILTER(WHERE last_seen>now()-interval '7 days') AS week,
+            count(*) FILTER(WHERE last_seen>now()-interval '30 days') AS month
+            FROM service_users WHERE telegram_user_id<>%s AND status='active'""",(STATISTICS_OWNER_ID,)).fetchone()
+        jobs=c.execute("""SELECT count(*) AS total,count(*) FILTER(WHERE j.state='failed') AS failed
+            FROM admin_job_metrics j JOIN service_users u ON u.user_id=j.author_user_id
+            WHERE u.telegram_user_id<>%s AND j.created_at>now()-interval '24 hours'""",(STATISTICS_OWNER_ID,)).fetchone()
+        return Reply(f"📊 Статистика бота\n\n👥 Пользователей: {users['total']}\n🆕 Новых за 7 дней: {users['new']}\n\nАктивные пользователи\nЗа 24 часа: {users['day']}\nЗа 7 дней: {users['week']}\nЗа 30 дней: {users['month']}\n\n🤖 ИИ-обработок за 24 часа: {jobs['total']}\nОшибок среди них: {jobs['failed']}\n\nАктивность — взаимодействие с ботом. Ваш аккаунт не учитывается.",[[('🔄 Обновить','ownerstats'),('☰ Меню','ui:menu')]],command_hints=False)
+
     def awaiting_contact(self,actor):
         with self._actor_transaction(actor) as c:
             return c.execute("SELECT 1 FROM ui_inputs WHERE user_id=actor_user_id() AND action='contact' AND expires_at>now() AND workspace_id=current_workspace()").fetchone() is not None
 
     def _admin_command(self,c,user,command,arg,sent):
+        if command=='/stats':return self._owner_statistics(c)
         if command=='/admin':
             code=self._create_admin_code(c,c.execute('SELECT actor_telegram_id() AS id').fetchone()['id'])
             return Reply(f'Панель: {self.admin_config.base_url}/login\nОдноразовый код (2 минуты):\n{code}\nВведите его в панели вместе с кодом вашего приложения TOTP. Не пересылайте код.')
@@ -36,6 +58,7 @@ class AdminService:
         return None
 
     def _admin_callback(self,c,user,callback):
+        if callback=='ownerstats':return self._owner_statistics(c)
         if not callback.startswith('diagconfirm:'):return None
         row=c.execute('UPDATE diagnostic_grants SET confirmed=true WHERE id=%s AND user_id=%s AND NOT revoked AND expires_at>now() RETURNING id',(UUID(callback.split(':')[1]),user)).fetchone()
         return Reply(f"Доступ разрешён. Отозвать: /diagnostic revoke {row['id']}" if row else 'Доступ истёк или отозван.')

@@ -78,9 +78,9 @@ def test_disabled_billing_and_short_help(service,database):
     assert '👋 <b>С чего начнём?</b>' in r.text
     assert r.buttons == [[('➖ Записать расход','add')], [('➕ Записать доход','ui:go:income')], [('☰ Меню','ui:menu')]]
     r=send(service,u,callback=button(r,'☰ Меню'))
-    r=send(service,u,callback=button(r,'💡 Помощь'))
+    assert '💡 Помощь' not in [x for row in r.buttons for x,_ in row]
     assert len(r.text)<700 and not r.messages
-    assert 'Моя подписка' in [x for row in r.buttons for x,_ in row]
+    assert '⭐ Подписка' in [x for row in r.buttons for x,_ in row]
     assert 'пока не включена' in send(service,u,callback='trialinfo').text
     assert not query(database,u,'SELECT trial_started_at FROM billing_accounts WHERE trial_started_at IS NOT NULL')
 

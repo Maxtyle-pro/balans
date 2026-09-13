@@ -16,10 +16,10 @@ def test_category_buttons_and_clothing(service,database):
     r=send(service,u,'Гардероб')
     assert 'Гардероб' in r.text
     r=send(service,u,callback=button(r,'🙈 Скрыть'))
-    r=send(service,u,callback=button(r,'🏷 Гардероб'))
+    r=send(service,u,callback=button(r,'Гардероб'))
     assert query(database,u,"SELECT archived FROM categories WHERE name='Гардероб'")==[(True,)]
     r=send(service,u,callback=button(r,'👁 Вернуть скрытую'))
-    r=send(service,u,callback=button(r,'🏷 Гардероб'))
+    r=send(service,u,callback=button(r,'Гардероб'))
     assert query(database,u,"SELECT archived FROM categories WHERE name='Гардероб'")==[(False,)]
     send(service,u,'/start')
     assert query(database,u,"SELECT count(*) FROM categories WHERE name='Одежда'")==[(0,)]
