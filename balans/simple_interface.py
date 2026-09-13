@@ -51,7 +51,7 @@ class SimpleInterface:
             arg=choice
             if choice=='previous':arg=(sent.astimezone(ZoneInfo(self._account_context(c)['timezone'])).date().replace(day=1)-timedelta(days=1)).strftime('%Y-%m')
             return self._dispatch(c,user,'/report '+arg,sent,None)
-        if text.split(maxsplit=1)[:1]==['/sheets'] or (callback and (callback in ('ui:go:sheets','ui:go:sheets_connect','ui:go:sheets_off') or callback.split(':')[0] in ('sverify','rsask','rexport'))):
+        if text.split(maxsplit=1) and text.split(maxsplit=1)[0].split('@')[0].lower()=='/sheets' or (callback and (callback in ('ui:go:sheets','ui:go:sheets_connect','ui:go:sheets_off') or callback.split(':')[0] in ('sverify','rsask','rexport'))):
             return Reply('Подключение таблиц отключено. Отчёт можно скачать файлом.',[[('📊 Отчёт','report')],[('Главное меню','ui:menu')]])
         handled=callback in ('ui:section:recognition','balance','accounts','ui:go:accounts','ui:go:settings','add','ui:go:add') or bool(callback and callback.startswith('ui:go:') and callback[6:] in HIDDEN_ACTIONS)
         if handled:c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))

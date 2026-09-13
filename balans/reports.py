@@ -70,6 +70,9 @@ class Reports:
         return self._report_card(report)
 
     def _sheets_command(self,c,user_id,arg):
+        return Reply('Подключение таблиц отключено. Отчёт можно скачать файлом.',[[('Отчёт','report')]])
+
+    def _legacy_sheets_command(self,c,user_id,arg):
         if arg=='off':
             c.execute("UPDATE sheets_connections SET state='revoked' WHERE state IN ('active','pending')")
             return Reply('Подключение Google Sheets отключено. Уже экспортированные копии остаются в Google.')

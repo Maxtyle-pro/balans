@@ -60,3 +60,10 @@ def test_period_and_timezone_are_buttons(service):
     assert 'Нью-Йорк' in readable(send(s,u,callback='tz:America/New_York')).text
     picker=readable(send(s,u,callback='ui:go:report_period'))
     readable(send(s,u,callback=button(picker,'Сегодня')))
+
+
+def test_addressed_sheets_command_cannot_connect(service,database):
+    s=service;u=next(USERS);enable(s,u)
+    for command in ('/sheets@balans_bot connect test','/SHEETS connect test'):
+        assert 'отключено' in send(s,u,command).text
+    assert query(database,u,'SELECT count(*) FROM sheets_connections')==[(0,)]
