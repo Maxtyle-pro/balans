@@ -57,3 +57,32 @@ def test_group_and_unsupported_input(service):
     assert bot.messages==[]
     asyncio.run(process_update(bot,service,update(50007)))
     assert 'ручной ввод' in bot.messages[-1][1]
+
+
+def test_developer_button_starts_bot_input(service):
+    from balans.__main__ import deliver_reply
+    from balans.domain import Reply
+    from balans.simple_interface import MAIN_BUTTONS
+    bot=FakeBot()
+    asyncio.run(deliver_reply(bot,555000,Reply('Меню',MAIN_BUTTONS)))
+    rows=bot.messages[-1][2]['reply_markup'].inline_keyboard
+    contact=next(b for row in rows for b in row if b.text=='✉️ Написать разработчику')
+    assert contact.url is None
+    assert contact.callback_data == 'ui:go:contact'
+    assert rows[0][0].callback_data=='add'
+
+
+def test_single_start_and_redelivery_send_one_reply(service):
+    from aiogram.types import Update
+    bot=FakeBot()
+    event=update(598001,'/start')
+    service.accept_updates(bot.id,[event,event])
+    job=service.next_update(bot.id)
+    assert job is not None
+    assert service.next_update(bot.id) is None
+    asyncio.run(process_update(bot,service,Update.model_validate(job['payload'])))
+    assert service.finish_update(bot.id,job['update_id'],job['lease_token'])
+    service.accept_updates(bot.id,[event])
+    assert service.next_update(bot.id) is None
+    assert len(bot.messages)==1
+    assert 'С чего начнём?' in bot.messages[0][1]

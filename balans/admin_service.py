@@ -5,6 +5,10 @@ from psycopg.types.json import Jsonb
 from balans.domain import Reply
 
 class AdminService:
+    def awaiting_contact(self,actor):
+        with self._actor_transaction(actor) as c:
+            return c.execute("SELECT 1 FROM ui_inputs WHERE user_id=actor_user_id() AND action='contact' AND expires_at>now() AND workspace_id=current_workspace()").fetchone() is not None
+
     def _admin_command(self,c,user,command,arg,sent):
         if command=='/admin':
             code=self._create_admin_code(c,c.execute('SELECT actor_telegram_id() AS id').fetchone()['id'])
@@ -13,7 +17,7 @@ class AdminService:
             if arg:
                 if len(arg)>3000:raise ValueError('Сообщение поддержке — до 3000 символов.')
                 row=c.execute('INSERT INTO support_tickets(user_id,telegram_user_id,body) VALUES(%s,actor_telegram_id(),%s) RETURNING id',(user,arg)).fetchone()
-                return Reply(f"Обращение сохранено: {row['id']}. Владелец сервиса увидит только присланный вами текст. /support — ответы.")
+                return Reply('✅ Сообщение принято и будет доставлено разработчику.',[[('☰ Меню','ui:menu')]])
             tickets=c.execute('SELECT id,state,reply FROM support_tickets WHERE user_id=%s ORDER BY created_at DESC LIMIT 5',(user,)).fetchall()
             intro=c.execute("SELECT value FROM service_content WHERE key='support_intro'").fetchone()
             return Reply(((intro['value'] if intro else self.support) or 'Поддержка: /support Текст обращения')+'\nНе отправляйте токены и пароли. Операции не прикладываются автоматически.\n'+'\n'.join(f"{t['id']} · {t['state']}\n{(t['reply'] or 'Ответа пока нет.')[:500]}" for t in tickets))

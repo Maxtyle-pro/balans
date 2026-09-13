@@ -14,6 +14,7 @@ import psycopg
 from balans.domain import Reply
 from balans.service import Service
 from balans.notifications import notification_loop
+from balans.support_delivery import support_loop
 from balans.inbox import inbox_loop
 from balans.admin_web import start_admin
 from balans.privacy import privacy_loop
@@ -43,6 +44,9 @@ async def process_update(bot, service, update):
         return
     # Plain text: names/descriptions are never interpreted as Telegram HTML/Markdown.
     if not query and message.text is None:
+        if await asyncio.to_thread(service.awaiting_contact,sender.id):
+            await deliver_reply(bot,message.chat.id,Reply('Напишите обращение текстом — так я смогу передать его разработчику.',[[('Отмена','ui:menu')]]),service)
+            return
         if message.voice:
             reply=await receive_voice_file(bot,service,update,message,sender)
             await deliver_reply(bot,message.chat.id,reply,service)
@@ -205,7 +209,7 @@ async def main():
                     await bot.set_my_commands([BotCommand(command=c,description=d) for c,d in COMMANDS])
                     admin_runner=await start_admin(service,bot)
                     if mode=='webhook':webhook_runner=await start_webhook(bot,service,process_update)
-                    background=[asyncio.create_task(privacy_loop(service)),asyncio.create_task(notification_loop(bot,service))]
+                    background=[asyncio.create_task(privacy_loop(service)),asyncio.create_task(notification_loop(bot,service)),asyncio.create_task(support_loop(bot,service))]
                     inboxes=[asyncio.create_task(inbox_loop(bot,service,process_update,stop)) for _ in range(workers)]
                     log.info('Бот @%s запущен (%s, обработчиков: %s)',me.username,mode,workers)
                     if mode=='polling':await polling(bot,service,stop)

@@ -5,7 +5,8 @@ MAIN_BUTTONS=[
  [('➖ Расход','add'),('➕ Доход','ui:go:income')],
  [('📋 История','history'),('📊 Отчёт','report')],
  [('💰 Баланс','balance'),('⚙️ Настройки','ui:go:settings')],
- [('⭐ Подписка','subscription'),('💡 Помощь','howto')]]
+ [('⭐ Подписка','subscription'),('💡 Помощь','howto')],
+ [('✉️ Написать разработчику','ui:go:contact')]]
 
 HIDDEN_ACTIONS={'sheets','sheets_connect','sheets_off','account','accounts','transfer','exchange','fx','workspaces','workspace','invite','join','members','funds','issue','returnfunds','claim','receive','reconcile','dispute','docs','attach','review','reviewqueue','correction','docaudit','docdelete','docdeleteconfirm','docquota','docquota_set','docpolicy','docpolicy_set','periodclose','periodopen','diagnostic'}
 

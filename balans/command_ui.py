@@ -33,6 +33,7 @@ for key,label in [
     ('admin','Панель администратора'),('demo','Тестовый пульт')]:action(key,label)
 
 for key,label,prompt in [
+    ('contact','✉️ Написать разработчику','Напишите сообщение разработчику текстом (до 3000 символов). Бот передаст его вместе с вашим Telegram ID. Финансовые записи не прикладываются.'),
     ('search','Найти операцию','Что найти в описаниях покупок? Например: кофе.'),
     ('account','Создать счёт','Введите название счёта. Например: Наличные. Валюта берётся из настроек.'),
     ('workspace','Создать общий бюджет','Как назвать общий бюджет? Например: Семья.'),
@@ -206,6 +207,6 @@ class CommandUI(HistoryUI):
             return Reply('Ввод устарел. Выберите действие заново.',[[('☰ Все действия','ui:menu')]])
         if not text.strip():return Reply(ACTIONS[pending['action']].prompt)
         c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
-        reply=self._dispatch(c,user,ACTIONS[pending['action']].command+' '+text.strip(),sent,None)
+        reply=self._dispatch(c,user,('/support' if pending['action']=='contact' else ACTIONS[pending['action']].command)+' '+text.strip(),sent,None)
         reply.buttons+=buttons([pending['action']])
         return reply
