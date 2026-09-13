@@ -35,9 +35,14 @@ def test_pdf_appendix_and_shared_image_once():
     pdf=PdfReader(BytesIO(render_detailed(snap,sources,files)))
     text=''.join(p.extract_text() for p in pdf.pages)
     assert 'Приложение' in text and 'Проверочный текст' in text
-    assert 'предыдущей связанной операции' in text
+    assert 'К операции 01' in text and 'К операции 02' in text
     assert sum(len(p.images) for p in pdf.pages)==1
-    assert len(pdf.outline)==1
+    page_ids={page.indirect_reference.idnum for page in pdf.pages}
+    links=[ref.get_object() for page in pdf.pages for ref in page.get('/Annots',[])]
+    assert len(links)==10  # four forward links, two return links on each appendix page
+    assert all(a['/Dest'][0].idnum in page_ids for a in links)
+    operation_page=next(page for page in pdf.pages if 'Проверочный текст' in page.extract_text())
+    assert len(operation_page.images)==0
 
 
 def test_original_text_in_detailed_report(service):

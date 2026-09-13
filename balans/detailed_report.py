@@ -49,53 +49,80 @@ def collect_sources(service,c,report):
 
 
 def render_detailed(snapshot,sources,files):
+    from reportlab.platypus import Table,TableStyle,Flowable
+    from pypdf import Transformation
     register_fonts()
-    normal=ParagraphStyle('detail',fontName='Balans',fontSize=10,leading=15,textColor=HexColor('#172D40'),spaceAfter=8)
-    heading=ParagraphStyle('detailTitle',parent=normal,fontName='BalansBold',fontSize=18,leading=23,spaceBefore=12,spaceAfter=12)
-    small=ParagraphStyle('detailSmall',parent=normal,fontSize=9,leading=13,textColor=HexColor('#607383'))
+    normal=ParagraphStyle('detail',fontName='Balans',fontSize=10,leading=15,textColor=HexColor('#173E32'),spaceAfter=5)
+    heading=ParagraphStyle('detailTitle',parent=normal,fontName='BalansBold',fontSize=18,leading=23,spaceAfter=12)
+    title_style=ParagraphStyle('operationTitle',parent=normal,fontName='BalansBold',fontSize=12,leading=17)
+    small=ParagraphStyle('detailSmall',parent=normal,fontSize=9,leading=13,textColor=HexColor('#61766D'))
     def p(s,style=normal):return Paragraph(escape(str(s)).replace('\n','<br/>'),style)
-    story=[p('Детализированный отчёт',heading),p(snapshot['start']+' — '+snapshot['end'],small)]
-    shown=set();appendices=[]
+    def link(label,target):return Paragraph('<link href="#'+target+'" color="#207D55"><u>'+escape(label)+'</u></link>',normal)
+    locations={}
+    class Anchor(Flowable):
+        def __init__(self,key):super().__init__();self.key=key
+        def draw(self):
+            self.canv.bookmarkHorizontal(self.key,0,0)
+            locations[self.key]=(self.canv.getPageNumber()-1,self.canv.absolutePosition(0,0)[1])
+    prepared={};pages=0
+    for key,f in files.items():
+        try:
+            if f['mime']=='application/pdf':
+                doc=PdfReader(BytesIO(f['data']))
+                if doc.is_encrypted or pages+len(doc.pages)>150:raise ValueError('PDF limit')
+                pages+=len(doc.pages);prepared[key]=('pdf',doc)
+            else:
+                with PILImage.open(BytesIO(f['data'])) as source:
+                    picture=ImageOps.exif_transpose(source).convert('RGB');picture.thumbnail((1400,1800))
+                    buf=BytesIO();picture.save(buf,'JPEG',quality=85);buf.seek(0)
+                    prepared[key]=('image',(buf,picture.width,picture.height))
+        except Exception:prepared[key]=('missing',None)
+    story=[p('Детализированный отчёт',heading),p(snapshot['start']+' — '+snapshot['end'],small),p('Все операции',heading)]
+    references={key:[] for key in files}
     for i,row in enumerate(snapshot['rows'],1):
-        operation_start=len(story)
         info=sources[row['id']];kind=row.get('kind','expense');symbol='₽' if row.get('currency','RUB')=='RUB' else row['currency']
         sign='−' if kind=='expense' else '+' if kind in ('income','refund') else ''
-        title=f"{i:02d} · {row['description']}"
-        subtitle=f"{date.fromisoformat(row['date']):%d.%m.%Y} · {sign}{fmt(row['amount'])} {symbol}"
-        if kind=='expense':subtitle+=' · '+row['category']
-        else:subtitle+=' · '+{'income':'Доход','opening':'Начальный остаток','refund':'Возврат'}.get(kind,'Операция')
-        story.extend([Spacer(1,12),p(title,heading),p(subtitle),p('Источник: '+info['label'],small)])
-        if int(row.get('revision',1))>1:story.append(p('Запись изменена пользователем. Показаны данные на момент формирования отчёта.',small))
-        if info['text']:story += [p('Распознанная речь' if info['label']=='Голосовое сообщение' else 'Сохранённый текст сообщения',small),p(info['text'])]
-        elif not info['files']:story.append(p('Исходное сообщение не сохранилось.',small))
+        cells=[p(f"{i:02d} · {row['description']}",title_style),p(f"{date.fromisoformat(row['date']):%d.%m.%Y} · {sign}{fmt(row['amount'])} {symbol} · "+(row['category'] if kind=='expense' else {'income':'Доход','opening':'Начальный остаток','refund':'Возврат'}.get(kind,'Операция')))]
+        if int(row.get('revision',1))>1:cells.append(p('Запись изменена пользователем.',small))
+        cells.append(p(info['label']+(' · расшифровка' if info['label']=='Голосовое сообщение' else ''),small))
+        if info['text']:cells.append(p(info['text']))
+        elif not info['files']:cells.append(p('Исходное сообщение не сохранилось.',small))
         for key in info['files']:
-            f=files[key];name='Вложение '+str(f['number'])
-            if key in shown:story.append(p(name+' — показано у предыдущей связанной операции.',small));continue
-            shown.add(key)
-            if f['mime']=='application/pdf':
-                try:
-                    doc=PdfReader(BytesIO(f['data']))
-                    if doc.is_encrypted:raise ValueError('encrypted')
-                    if sum(len(x[1].pages) for x in appendices)+len(doc.pages)>150:raise ValueError('too many pages')
-                    appendices.append((name,doc));story.append(p(name+' · PDF, страниц: '+str(len(doc.pages))+'. Полный документ — в приложении в конце отчёта.',small))
-                except Exception:story.append(p(name+' · Не удалось включить PDF. Оригинал можно скачать в разделе «Мои файлы».',small))
-            else:
-                try:
-                    with PILImage.open(BytesIO(f['data'])) as source:
-                        picture=ImageOps.exif_transpose(source).convert('RGB');picture.thumbnail((1400,1800));buf=BytesIO();picture.save(buf,'JPEG',quality=85);buf.seek(0)
-                        scale=min(480/picture.width,450/picture.height,1)
-                        story += [p(name+' · изображение',small),Image(buf,width=picture.width*scale,height=picture.height*scale)]
-                except Exception:story.append(p(name+' · Не удалось показать изображение.',small))
-        if info['missing']:story.append(p('Часть вложений больше не хранится или недоступна.',small))
-        story[operation_start:]=[KeepTogether(story[operation_start:])]
+            number=files[key]['number'];references[key].append((i,row['description']))
+            if prepared[key][0]=='missing':cells.append(p(f'Вложение {number} недоступно для просмотра в отчёте.',small))
+            else:cells.append(link(f'Открыть '+('документ' if prepared[key][0]=='pdf' else 'фото')+f' → приложение {number}',f'file{number}'))
+        if info['missing']:cells.append(p('Часть вложений больше не хранится или недоступна.',small))
+        cells[0]=[Anchor(f'op{i}'),cells[0]]
+        card=Table([[cell] for cell in cells],colWidths=[505],hAlign='LEFT',splitByRow=1,splitInRow=1)
+        card.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),HexColor('#EFF8F0')),('LINEBEFORE',(0,0),(0,-1),3,HexColor('#8BC59D')),('LEFTPADDING',(0,0),(-1,-1),14),('RIGHTPADDING',(0,0),(-1,-1),14),('TOPPADDING',(0,0),(-1,0),12),('BOTTOMPADDING',(0,-1),(-1,-1),12)]))
+        story.extend([KeepTogether([card]),Spacer(1,14)])
     if not snapshot['rows']:story.append(p('За этот период записей нет.'))
+    overlays=[]
+    for key,(kind,data) in prepared.items():
+        if kind=='missing' or not references[key]:continue
+        number=files[key]['number']
+        for index in range(len(data.pages) if kind=='pdf' else 1):
+            story.extend([PageBreak(),Anchor(f'file{number}' if index==0 else f'file{number}page{index}'),p(f'Приложение {number} · '+('Документ' if kind=='pdf' else 'Фото'),heading)])
+            for i,description in references[key]:story.append(link(f'← К операции {i:02d} · {description}',f'op{i}'))
+            if kind=='pdf':
+                story.append(p(f'Страница {index+1} из {len(data.pages)}',small))
+                marker=f'pdf{number}page{index}';story.append(KeepTogether([Anchor(marker),Spacer(1,490)]))
+                overlays.append((marker,data.pages[index]))
+            else:
+                buf,w,h=data;scale=min(490/w,480/h,1)
+                story.append(Image(buf,width=w*scale,height=h*scale))
     out=BytesIO()
     SimpleDocTemplate(out,rightMargin=45,leftMargin=45,topMargin=40,bottomMargin=45).build(story)
-    writer=PdfWriter();writer.append(BytesIO(render_pdf(snapshot,include_operations=False)));writer.append(BytesIO(out.getvalue()))
-    for name,doc in appendices:
-        cover=BytesIO();SimpleDocTemplate(cover).build([p('Приложение · '+name,heading),p('Исходный документ. Следующие страницы содержат оригинал.')]);writer.append(BytesIO(cover.getvalue()))
-        writer.add_outline_item(name,len(writer.pages)-1)
-        for page in doc.pages:writer.add_page(page,excluded_keys=['/Annots','/AA'])
+    detail=PdfWriter(clone_from=BytesIO(out.getvalue()))
+    for marker,source in overlays:
+        page_index,top=locations[marker]
+        source.transfer_rotation_to_content()
+        width=float(source.mediabox.width);height=float(source.mediabox.height)
+        scale=min(495/width,480/height)
+        for field in ('/Annots','/AA'):source.pop(field,None)
+        transform=Transformation().translate(-float(source.mediabox.left),-float(source.mediabox.bottom)).scale(scale).translate(45+(495-width*scale)/2,top-480)
+        detail.pages[page_index].merge_transformed_page(source,transform)
+    writer=PdfWriter();writer.append(BytesIO(render_pdf(snapshot,include_operations=False)));detail_bytes=BytesIO();detail.write(detail_bytes);detail_bytes.seek(0);writer.append(detail_bytes)
     final=BytesIO();writer.write(final)
     if final.tell()>45*1024*1024:raise ValueError('PDF слишком большой. Выберите более короткий период.')
     return final.getvalue()
