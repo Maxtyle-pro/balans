@@ -41,7 +41,9 @@ def test_buffer_limit_and_private_storage(tmp_path):
         store.path('../../outside')
     old=time.time()-31*86400
     os.utime(store.path(identity),(old,old))
-    with pytest.raises(MediaError):
-        store.read(identity)
+    # File age cannot override a retention extension recorded in the database.
+    assert store.read(identity)==b'original'
     store.purge()
+    assert store.path(identity).exists()
+    store.remove(identity)
     assert not store.path(identity).exists()

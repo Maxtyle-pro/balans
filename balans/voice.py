@@ -22,6 +22,8 @@ class Voice:
         return c.execute("SELECT id FROM voice_jobs WHERE state='processing'").fetchone() is not None
 
     def _voice_gate(self, c):
+        quota=self._quota_preflight(c,'voice')
+        if quota:return quota
         if self._document_upload(c):return Reply('Сначала завершите прикрепление документа или /cancel.')
         if self._media_queue(c):return Reply('Сначала завершите список изображений: /media.')
         if not c.execute('SELECT voice_enabled FROM user_settings WHERE user_id=actor_user_id()').fetchone()['voice_enabled']:
@@ -31,7 +33,7 @@ class Voice:
         c.execute("UPDATE operation_drafts SET state='cancelled' WHERE state='pending' AND expires_at<=now()")
         c.execute("UPDATE receipt_batches SET state='cancelled' WHERE state='collecting' AND expires_at<=now()")
         if self._draft(c) or c.execute("SELECT id FROM receipt_batches WHERE state IN ('collecting','processing')").fetchone():
-            return Reply('Сначала завершите текущий расход или чек. /add — черновик; /cancel — отмена.')
+            return Reply('Сначала завершите текущую запись или отмените её.',[[('Продолжить запись','ui:resume')],[('Отменить ввод','ui:go:cancel')]])
         if self._voice_busy(c):
             return Reply('Предыдущее голосовое сообщение обрабатывается. /voice — состояние; /cancel — отмена.')
 
@@ -51,13 +53,13 @@ class Voice:
         c.execute("UPDATE voice_jobs SET state='failed',error_code='interrupted' WHERE id=%s", (job['id'],))
         return Reply('Обработка голоса прервалась. Отправьте запись заново или используйте /manual. Автоматического повторного AI-запроса нет.')
 
-    def voice_preflight(self, actor, bot, update):
+    def voice_preflight(self, actor, bot, update, seconds=1):
         with self._actor_transaction(actor) as c:
             c.execute('SELECT bootstrap()')
             old=c.execute('SELECT response,workspace_id FROM telegram_updates WHERE bot_id=%s AND update_id=%s',(bot,update)).fetchone()
             if old:
                 return self._voice_cached(c,self._safe_cached(c,old))
-            return self._voice_gate(c)
+            return self._quota_preflight(c,'voice',max(1,seconds)) or self._voice_gate(c)
 
     def receive_voice(self, actor, bot, update, sent_at, data):
         gate=self.voice_preflight(actor,bot,update)
@@ -103,8 +105,10 @@ class Voice:
                 return Reply('Обработка голоса отменена или истекла.')
             if error:
                 reply=Reply('Не удалось распознать или разобрать голос. Ничего не сохранено. Отправьте запись заново или /manual.' + ('\nРасшифровка: '+transcript[:1500] if transcript else ''))
-            elif result.kind!='expense' or result.currency!=row['currency']:
-                reply=Reply('Нужен один совершённый расход в валюте выбранного счёта. Доходы, переводы, планы и несколько расходов в одной записи пока не поддерживаются. Ничего не сохранено. /manual — ввод вручную.\nРасшифровка: '+transcript[:1500])
+            elif result.kind not in ('expense','income','opening','incoming') or result.currency not in (None,row['currency']):
+                reply=Reply('Нужна одна совершённая операция в валюте учёта: расход, доход или начальный остаток. Переводы своих денег и планы не записываются. Ничего не сохранено. /manual — ввод вручную.\nРасшифровка: '+transcript[:1500])
+            elif result.kind in ('income','opening','incoming') and c.execute("SELECT kind='shared' AS yes FROM workspaces WHERE id=current_workspace()").fetchone()['yes']:
+                reply=Reply('Приход в общий бюджет требует сверки.',[[('Выдачи и сверка','ui:go:funds')]])
             elif self._draft(c):
                 reply=Reply('Уже открыт другой черновик. Голос не сохранён. Завершите его и отправьте запись заново.')
             else:
@@ -112,8 +116,10 @@ class Voice:
                 category=match_rule(result.description,rules) or result.category_id
                 c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,timezone_snapshot,source_sent_at,amount,description,occurred_on,category_id,step,flow,voice_job_id,category_source) VALUES(%s,actor_user_id(),%s,%s,%s,%s,%s,%s,%s,'confirm','auto',%s,%s)",
                           (row['id'],row['account_id'],row['timezone'],sent_at,result.amount,result.description,result.occurred_on,UUID(category) if category else None,job['id'],'rule' if category and category!=result.category_id else 'ai'))
+                c.execute('UPDATE operation_drafts SET kind=%s,capture_kind_pending=%s,category_id=CASE WHEN %s THEN category_id ELSE NULL END WHERE voice_job_id=%s',('income' if result.kind=='incoming' else result.kind,result.kind=='incoming',result.kind=='expense',job['id']))
                 # Persist date explanation before rendering the preview.
                 c.execute('UPDATE voice_jobs SET result=%s WHERE id=%s',(Jsonb(result.model_dump()),job['id']))
+                c.execute('UPDATE operation_drafts SET automatic_capture=%s WHERE voice_job_id=%s',(self._capture_enabled(c),job['id']))
                 reply=self._voice_prompt(c,self._draft(c))
             c.execute('UPDATE voice_jobs SET state=%s,reply=%s,error_code=%s,result=%s WHERE id=%s',('failed' if error else 'ready',Jsonb(asdict(reply)),error,Jsonb(result.model_dump()) if result else None,job['id']))
             return reply
@@ -142,12 +148,12 @@ class Voice:
             reply=self._voice_cached(c,Reply('',voice_job_id=str(job['id'])))
             reply.text+='\nМожно отправить новый голос после завершения текущего черновика.'
             return reply
-        return Reply('Отправьте голос: «Вчера потратил восемьсот пятьдесят рублей на продукты». До 3 минут и 15 МБ, один расход. Перед сохранением проверьте карточку.')
+        return Reply('Отправьте голос: «Вчера потратил восемьсот пятьдесят рублей на продукты». До 3 минут и 15 МБ, одна операция: расход, доход или начальный остаток.')
 
     def _voice_callback(self,c,user_id,callback):
         if callback=='voice_on':
             c.execute("UPDATE user_settings SET voice_enabled=true,voice_consented_at=now(),voice_consent_version='voice-v1' WHERE user_id=%s",(user_id,))
-            return Reply('Голосовой ввод включён. Отправьте голосовое сообщение об одном расходе в рублях. Например: «Вчера потратил 850 рублей на продукты».')
+            return Reply('Голосовой ввод включён. Отправьте голосовое сообщение об одной операции в валюте учёта: расходе, доходе или начальном остатке. Например: «Вчера потратил 850 рублей на продукты».')
         if not callback.startswith(('vfield:','vduplicate:')):
             return None
         parts=callback.split(':')
@@ -164,6 +170,8 @@ class Voice:
         return self._voice_prompt(c,self._draft(c))
 
     def _voice_prompt(self,c,d):
+        captured=self._capture_draft(c,d)
+        if captured is not None:return captured
         from balans.domain import CURRENCY
         CURRENCY.set(self._account_currency(c,d['account_id']))
         if d['step']=='category':

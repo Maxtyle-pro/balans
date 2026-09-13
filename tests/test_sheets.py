@@ -27,7 +27,7 @@ def test_atomic_export_typed_literals_and_recover_uncertain_write():
     with pytest.raises(SheetsError):sheets.export('a'*30,'challenge','job-1',12,snapshot)
     requests=session.calls[-1][2]['json']['requests']
     cells=requests[1]['updateCells']['rows'][1]['values']
-    assert cells[7]['userEnteredValue']=={'stringValue':'=IMPORTXML("evil")'}
+    assert cells[6]['userEnteredValue']=={'stringValue':'=IMPORTXML("evil")'}
     assert cells[3]['userEnteredValue']=={'numberValue':137.25}
     session.fail_after_write=False
     url=sheets.export('a'*30,'challenge','job-1',12,snapshot)

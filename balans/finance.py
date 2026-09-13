@@ -49,13 +49,16 @@ class Finance:
         amount=amount_from_text(value.lstrip('-')) if value else None
         c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,category_id,timezone_snapshot,source_sent_at,amount,description,occurred_on,step,kind,destination_account_id,refund_of,opening_negative) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                   (row['id'],user,row['account_id'],category,row['timezone'],sent,amount,description,date_from_text(day or 'сегодня',sent,row['timezone']),'confirm' if amount else 'amount',kind,destination,refund,negative))
+        if kind in ('income','opening') and self._capture_enabled(c):
+            c.execute('UPDATE operation_drafts SET automatic_capture=true WHERE id=%s',(self._draft(c)['id'],))
+            if amount is not None:return self._prompt(c,self._draft(c))
         return self._finance_prompt(c,self._draft(c))
 
     def _finance_prompt(self,c,d):
         CURRENCY.set(self._account_currency(c,d['account_id']))
         if d['finance_edit_field']:
             return Reply({'amount':'Введите новую сумму. Для отрицательного начального остатка используйте минус.', 'date':'Введите дату: сегодня, вчера или ДД.ММ.ГГГГ.', 'description':'Введите описание, до 500 символов.', 'destination':'Введите точное название счёта получателя.', 'account':'Введите точное название счёта.', 'received':'Введите фактически зачисленную сумму в валюте счёта получателя.', 'reason':'Укажите причину отмены, до 500 символов.'}[d['finance_edit_field']],[[('Отмена',f"cancel:{d['id']}:{d['version']}")]])
-        if d['step']=='amount':return Reply('Введите сумму в валюте счёта '+CURRENCY.get()+'. /cancel — отмена.')
+        if d['step']=='amount':return Reply('Введите сумму в валюте учёта '+CURRENCY.get()+'. /cancel — отмена.')
         suffix=f"{d['id']}:{d['version']}"
         text=(('Отмена операции' if d['cancel_operation'] else ('Исправление: ' if d['edit_operation_id'] else '')+KINDS[d['kind']])+f"\nСумма: {money(-d['amount'] if d['opening_negative'] else d['amount'])}\n"
               +(f"Получатель: {self._account_name(c,d['destination_account_id'])}\n" if d['destination_account_id'] else '')+f"Дата: {d['occurred_on']:%d.%m.%Y}\nОписание: {d['description'] or '—'}\n"
@@ -65,11 +68,12 @@ class Finance:
         buttons=[[('Подтвердить',f'fsave:{suffix}'),('Отмена',f'cancel:{suffix}')]]
         if not d['cancel_operation']:
             buttons.append([(label,f'ffield:{field}:{suffix}') for label,field in [('Сумма','amount'),('Дата','date'),('Описание','description')]])
-            buttons.append([('Счёт',f'ffield:account:{suffix}')]+([('Получатель',f'ffield:destination:{suffix}')] if d['kind']=='transfer' else []))
+
         if d['kind']=='transfer' and not d['cancel_operation'] and self._account_currency(c,d['account_id'])!=self._account_currency(c,d['destination_account_id']):buttons.append([('Сумма зачисления',f'ffield:received:{suffix}')])
         if d['edit_operation_id'] and not d['cancel_operation']:
             category=c.execute('SELECT name FROM categories WHERE id=%s',(d['category_id'],)).fetchone()
-            if category:text+='\nКатегория: '+category['name']
+            if category:text+='\n'+('⚠️ ' if category['name']=='Без категории' else '')+'Категория: '+category['name']
+            if 'date' in d['capture_warnings']:text+='\n⚠️ Дата взята из сообщения — уточните при необходимости.'
             buttons[0][0]=('Сохранить изменения',f'fsave:{suffix}')
             if d['kind']=='expense':buttons.append([('Категория',f'recat:{suffix}')])
             original=c.execute('SELECT d.receipt_batch_id FROM operations o JOIN operation_drafts d ON d.id=o.source_draft_id WHERE o.id=%s',(d['edit_operation_id'],)).fetchone()
@@ -98,10 +102,12 @@ class Finance:
             if not text or len(text)>500:raise ValueError('Введите от 1 до 500 символов.')
             if field=='reason':c.execute('UPDATE operation_drafts SET change_reason=%s WHERE id=%s',(text,d['id']))
             else:c.execute('UPDATE operation_drafts SET description=%s WHERE id=%s',(text,d['id']))
+        if field in ('date','description'):
+            c.execute('UPDATE operation_drafts SET capture_warnings=array_remove(capture_warnings,%s) WHERE id=%s',(field,d['id']))
         current=self._draft(c)
         if current['kind']=='transfer' and self._account_currency(c,current['account_id'])==self._account_currency(c,current['destination_account_id']):c.execute('UPDATE operation_drafts SET destination_amount=amount WHERE id=%s',(d['id'],))
         c.execute("UPDATE operation_drafts SET step='confirm',finance_edit_field=NULL,version=version+1 WHERE id=%s",(d['id'],))
-        return self._finance_prompt(c,self._draft(c))
+        return self._prompt(c,self._draft(c)) if d['automatic_capture'] and not d['edit_operation_id'] else self._finance_prompt(c,self._draft(c))
 
     def _finance_callback(self,c,user,callback,sent):
         action,_,raw=callback.partition(':')
@@ -127,6 +133,7 @@ class Finance:
             if self._draft(c):return Reply('Сначала завершите текущий черновик или /cancel.')
             c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,category_id,amount,description,occurred_on,timezone_snapshot,source_sent_at,step,kind,destination_account_id,refund_of,edit_operation_id,expected_revision_id,cancel_operation,opening_negative,finance_edit_field,change_reason,destination_amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,'confirm',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                       (o['workspace_id'],user,o['account_id'],o['category_id'],o['amount'],o['description'],o['occurred_on'],o['timezone_snapshot'],sent,o['kind'],o['destination_account_id'],o['refund_of'],o['operation_id'],o['current_revision_id'],action=='fdelete',o['opening_negative'],'reason' if action=='fdelete' else None,'Исправление пользователем',o['destination_amount']))
+            c.execute('UPDATE operation_drafts SET capture_warnings=%s WHERE id=%s',(o['capture_warnings'],self._draft(c)['id']))
             return self._finance_prompt(c,self._draft(c))
         if action not in ('fsave','ffield'):return None
         field=None
@@ -140,6 +147,7 @@ class Finance:
             c.execute('UPDATE operation_drafts SET finance_edit_field=%s,version=version+1 WHERE id=%s',(field,d['id']))
             return self._finance_prompt(c,self._draft(c))
         operation=self._save_operation(c,d['id'])
+        if d['edit_operation_id'] and not d['cancel_operation'] and self._capture_enabled(c):return self._capture_card(c,operation)
         return Reply('Операция отменена.' if d['cancel_operation'] else 'Операция сохранена.',[[('История','history'),('Меню','ui:menu')]])
 
     def _finance_command(self,c,user,command,arg,sent):

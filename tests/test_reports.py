@@ -96,7 +96,7 @@ def test_empty_report_no_ai(reporting):
     s,ai,_=reporting;user=next(USERS)
     card=send(s,user,'/report')
     assert 'Нет операций' in card.text
-    assert 'не вызывается' in send(s,user,callback=button(card,'AI-анализ')).text
+    assert 'не вызывается' in send(s,user,callback=button(card,'🤖 ИИ-анализ')).text
     assert not ai.calls
 
 
@@ -130,26 +130,21 @@ def test_ai_concurrent(reporting):
     assert len(ai.calls)==1
 
 
-def test_sheets_verified_explicit_export_and_revoke(reporting):
+def test_sheets_disabled_in_report_and_old_buttons(reporting):
     s,_,sheets=reporting;user=next(USERS);expense(s,user)
-    assert 'подключены' in connect(s,user).text
+    assert 'отключено' in send(s,user,'/sheets connect https://docs.google.com/spreadsheets/d/'+'a'*30+'/edit').text
     card=send(s,user,'/report')
-    consent=send(s,user,callback=button(card,'Google Sheets'))
-    assert 'описания' in consent.text and not sheets.calls
-    callback=button(consent,'Экспортировать в эту таблицу')
-    done=send(s,user,callback=callback);send(s,user,callback=callback)
-    assert 'Экспорт готов' in done.text and len(sheets.calls)==1
-    assert sheets.calls[0][-1]['summary']['total']=='100.250000'
-    card=send(s,user,'/report');consent=send(s,user,callback=button(card,'Google Sheets'))
-    send(s,user,'/sheets off')
-    assert 'изменилось' in send(s,user,callback=button(consent,'Экспортировать в эту таблицу')).text
-    assert len(sheets.calls)==1
+    assert not any('Google' in label for row in card.buttons for label,_ in row)
+    from uuid import uuid4
+    for action in ('sverify','rsask','rexport'):
+        assert 'отключено' in send(s,user,callback=action+':'+str(uuid4())).text
+    assert not sheets.calls
 
 
-def test_wrong_challenge_not_connected(reporting,database):
-    s,_,sheets=reporting;user=next(USERS);sheets.valid=False
-    assert 'не подтверждён' in connect(s,user).text
-    assert query(database,user,"SELECT state FROM sheets_connections")==[('pending',)]
+def test_disabled_sheets_does_not_create_connection(reporting,database):
+    s,_,sheets=reporting;user=next(USERS)
+    send(s,user,'/sheets connect https://docs.google.com/spreadsheets/d/'+'a'*30+'/edit')
+    assert query(database,user,'SELECT state FROM sheets_connections')==[]
 
 
 def test_expired_snapshots_and_bad_callback(reporting,database):

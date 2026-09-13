@@ -11,7 +11,10 @@ USERS=count(180000000)
 
 def account(s,u,name='Доллары',currency='USD'):
     r=send(s,u,f'/account {name} | {currency}')
-    return send(s,u,callback=button(r,'Использовать этот счёт'))
+    # Legacy ledger fixtures may contain multiple accounts; the user UI no longer selects them.
+    from uuid import UUID
+    with s._actor_transaction(u) as c:
+        c.execute('UPDATE user_settings SET default_account_id=%s WHERE user_id=actor_user_id()',(UUID(button(r,'Использовать этот счёт').split(':')[1]),))
 
 def confirm(s,u,r):return send(s,u,callback=next(data for row in r.buttons for label,data in row if label in ('Подтвердить','Сохранить изменения')))
 
@@ -31,7 +34,7 @@ def test_native_accounts_reports_and_export(service,database):
     exported=send(s,u,'/csv all | currency=all')
     rows=list(csv.reader(base64.b64decode(exported.generated_document).decode('utf-8-sig').splitlines()))
     assert {r[4] for r in rows[1:]}=={'RUB','USD'}
-    assert len(rows[0])==len(rows[1])==24
+    assert len(rows[0])==len(rows[1])==22
     sharing=send(s,u,callback=button(all_report,'Поделиться'))
     assert len(sharing.messages)==2 and 'USD' in ''.join(sharing.messages)
     assert 'одну валюту' in send(s,u,'/analyze all | currency=all').text
@@ -53,7 +56,8 @@ def test_manual_fx_snapshot_and_no_rate_conversion(service,database):
 
 def test_exchange_two_amounts_and_cancellation(service,database):
     s=service;u=next(USERS);send(s,u,'/start');confirm(s,u,send(s,u,'/opening 100'))
-    account(s,u);send(s,u,callback=button(send(s,u,'/accounts'),'Основной'))
+    account(s,u)
+    query(database,u,"UPDATE user_settings SET default_account_id=(SELECT id FROM accounts WHERE name='Основной') RETURNING user_id")
     preview=send(s,u,'/exchange 100 | Доллары | 1 | сегодня')
     assert '100,00 ₽' in preview.text and '1,00 USD' in preview.text
     confirm(s,u,preview)

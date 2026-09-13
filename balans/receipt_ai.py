@@ -28,7 +28,7 @@ class Line(BaseModel):
 
 class ImageTransaction(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
-    kind: Literal['expense','income','refund','transfer','unknown']
+    kind: Literal['expense','income','opening','incoming','refund','transfer','unknown']
     amount: str | None
     currency: str | None
     occurred_on: str | None

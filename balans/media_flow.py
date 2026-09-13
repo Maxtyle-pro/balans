@@ -12,13 +12,19 @@ from balans.receipt_ai import mask,number
 class MediaFlow:
     def _media_queue(self,c):
         c.execute("UPDATE media_queues SET state='cancelled' WHERE state='active' AND expires_at<=now()")
-        return c.execute("SELECT * FROM media_queues WHERE state='active'").fetchone()
+        q=c.execute("SELECT * FROM media_queues WHERE state='active'").fetchone()
+        if q and any(item['state']=='pending' and not item.get('currency') for item in q['items']):
+            for item in q['items']:
+                if item['state']=='pending' and not item.get('currency'):item['currency']=self._account_currency(c,UUID(item['account']))
+            q=c.execute('UPDATE media_queues SET items=%s,version=version+1 WHERE id=%s RETURNING *',(Jsonb(q['items']),q['id'])).fetchone()
+        return q
 
     def _media_finish(self,c,batch,result):
         today=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date()
         items=[]
         for raw in result['transactions']:
             item=dict(raw)
+            if not item.get('currency'):item['currency']=self._account_currency(c,batch['account_id'])
             if item['occurred_on'] and datetime.strptime(item['occurred_on'],'%Y-%m-%d').date()>today:item['occurred_on']=None
             item.update(state='pending',account=str(batch['account_id']),destination=None,refund=None,paid=False,duplicate_confirmed=False,source_type=result.get('source_type') if result.get('source_type') in ('receipt','screenshot','terminal') else None)
             if item['kind']=='expense':
@@ -27,6 +33,7 @@ class MediaFlow:
             item['suggested_category']=item['category_id']
             items.append(item)
         queue=c.execute('INSERT INTO media_queues(workspace_id,author_user_id,source_batch_id,items) VALUES(%s,%s,%s,%s) RETURNING *',(batch['workspace_id'],batch['author_user_id'],batch['id'],Jsonb(items))).fetchone()
+        if self._capture_enabled(c):return self._capture_media(c,queue)
         return self._media_card(c,queue,0) if len(items)==1 else self._media_list(c,queue,grouped=True)
 
     def _media_blocker(self,c):
@@ -123,8 +130,13 @@ class MediaFlow:
         return c.execute("SELECT o.id,r.description,r.amount,r.occurred_on FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.state='active' AND o.kind=%s AND ((r.amount=%s AND r.occurred_on=%s) OR (%s::text IS NOT NULL AND r.external_reference_hash=%s)) AND NOT EXISTS(SELECT 1 FROM operation_drafts d JOIN receipt_batches b ON b.id=d.receipt_batch_id WHERE d.id=o.source_draft_id AND b.parent_batch_id=%s::uuid) ORDER BY o.created_at DESC LIMIT 3",(item['kind'],Decimal(item['amount']),item['occurred_on'],item.get('reference_hash'),item.get('reference_hash'),item.get('split_group'))).fetchall()
 
     def _media_card(self,c,q,index):
+        captured=self._capture_media_item(c,q,index)
+        if captured is not None:return captured
         item=q['items'][index]
         if item['state']!='pending':return self._media_list(c,q)
+        if item['kind']=='incoming':
+            suffix=f"{q['id']}:{index}:{q['version']}"
+            return Reply('Это новый доход или деньги, которые уже были до начала учёта?',[[('Доход',f'mkind:income:{suffix}'),('Начальный остаток',f'mkind:opening:{suffix}')]])
         c.execute('UPDATE media_queues SET selected_index=%s,edit_field=NULL WHERE id=%s',(index,q['id']))
         category=c.execute('SELECT name FROM categories WHERE id=%s',(UUID(item['category_id']),)).fetchone() if item['category_id'] else None
         text=f"Операция {index+1}\nТип: {KINDS.get(item['kind'],'Выберите тип')}\nСумма: {item['amount'] or '?'} {item['currency'] or '?'}\nДата: {item['occurred_on'] or 'Не прочитана — укажите вручную'}\nКонтрагент: {item['merchant'] or 'Не прочитан'}\nОписание: {item['description']}\nКатегория: {category['name'] if category else 'Не выбрана'}"
@@ -137,11 +149,15 @@ class MediaFlow:
         if item['destination']:text+='\nПолучатель: '+self._account_name(c,UUID(item['destination']))
         if item['refund']:text+='\nИсходная покупка: '+item['refund']
         suffix=f"{q['id']}:{index}:{q['version']}";buttons=[]
+        currency=self._account_currency(c,UUID(item['account']))
+        if item['currency']!=currency:
+            text+=f'\n⚠️ На изображении указана валюта {item["currency"]}, а валюта учёта — {currency}. Автоматический пересчёт не выполняется.'
+            buttons.append([('Не добавлять эту операцию',f'mdrop:{suffix}')])
         if not item['source_type']:text+='\nВыберите тип изображения'
         if not item['source_type']:buttons.append([(label,f'msource:{value}:{suffix}') for value,label in [('receipt','Чек'),('screenshot','Скриншот'),('terminal','Касса/терминал')]])
-        buttons.append([(label,f'mkind:{kind}:{suffix}') for kind,label in [('expense','Расход'),('income','Доход'),('refund','Возврат'),('transfer','Между своими счетами')]])
-        buttons.append([(label,f'mf:{field}:{suffix}') for field,label in [('amount','Сумма'),('date','Дата'),('currency','Валюта')]])
-        buttons.append([(label,f'mf:{field}:{suffix}') for field,label in [('merchant','Контрагент'),('description','Описание'),('account','Счёт')]])
+        buttons.append([(label,f'mkind:{kind}:{suffix}') for kind,label in [('expense','Расход'),('income','Доход'),('opening','Начальный остаток'),('refund','Возврат')]])
+        buttons.append([(label,f'mf:{field}:{suffix}') for field,label in [('amount','Сумма'),('date','Дата')]])
+        buttons.append([(label,f'mf:{field}:{suffix}') for field,label in [('merchant','Продавец / источник'),('description','Описание')]])
         if item['kind']=='expense':
             buttons.append([('Выбрать другую категорию',f'mf:category:{suffix}')])
             if len(item['items'])>1:buttons.insert(0,[('Разбить по категориям',f"msplit:{q['id']}:{q['version']}:{index}")])
@@ -214,12 +230,16 @@ class MediaFlow:
                 child=c.execute("INSERT INTO receipt_batches(workspace_id,author_user_id,account_id,source_sent_at,timezone_snapshot,model,state,parent_batch_id,result) VALUES(%s,%s,%s,%s,%s,%s,'ready',%s,%s) RETURNING id",(batch['workspace_id'],batch['author_user_id'],UUID(item['account']),batch['source_sent_at'],batch['timezone_snapshot'],batch['model'],batch['id'],Jsonb({'payment_status':item['payment_status'],'warnings':[]}))).fetchone()['id']
                 d=c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,amount,description,occurred_on,category_id,timezone_snapshot,source_sent_at,step,kind,destination_account_id,refund_of,receipt_batch_id,receipt_currency,payment_confirmed,duplicate_confirmed,merchant,source_type,external_reference_hash) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,'confirm',%s,%s,%s,%s,%s,true,%s,%s,%s,%s) RETURNING id",(q['workspace_id'],q['author_user_id'],UUID(item['account']),Decimal(item['amount']),item['description'] or item['merchant'] or 'Операция по изображению',item['occurred_on'],UUID(item['category_id']) if item['category_id'] else None,batch['timezone_snapshot'],batch['source_sent_at'],item['kind'],UUID(item['destination']) if item['destination'] else None,UUID(item['refund']) if item['refund'] else None,child,item['currency'],bool(item['duplicate_confirmed'] or item.get('split_group')),item['merchant'],item['source_type'],item.get('reference_hash'))).fetchone()['id']
                 for line_no,line in enumerate(item['items'],1):c.execute('INSERT INTO receipt_items(workspace_id,author_user_id,batch_id,line_no,name,quantity,unit_price,line_total,discount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)',(q['workspace_id'],q['author_user_id'],child,line_no,line['name'],number(line['quantity'],True),number(line['unit_price']),number(line['line_total']),number(line['discount'])))
+                c.execute('UPDATE operation_drafts SET capture_warnings=%s WHERE id=%s',(item.get('capture_warnings',[]),d))
                 identity=self._save_operation(c,d);kind='operation'
-                if item['kind']=='expense' and item.get('suggested_category')!=item['category_id']:
+                if not self._capture_enabled(c) and item['kind']=='expense' and item.get('suggested_category')!=item['category_id']:
                     operation=c.execute('SELECT o.current_revision_id,r.description FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.id=%s',(identity,)).fetchone()
                     feedback=c.execute('INSERT INTO category_feedback(workspace_id,author_user_id,operation_id,old_category_id,new_category_id,description,expected_revision_id) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id',(q['workspace_id'],q['author_user_id'],identity,UUID(item['suggested_category']) if item.get('suggested_category') else None,UUID(item['category_id']),operation['description'],operation['current_revision_id'])).fetchone()['id']
             item['state']='saved';item['result_id']=str(identity);item['result_kind']=kind
             q=c.execute('UPDATE media_queues SET items=%s,version=version+1 WHERE id=%s RETURNING *',(Jsonb(q['items']),q['id'])).fetchone()
+        if self._capture_enabled(c) and kind=='operation':
+            if not any(x['state']=='pending' for x in q['items']):c.execute("UPDATE media_queues SET state='done' WHERE id=%s",(q['id'],))
+            return self._capture_card(c,identity)
         reply=self._media_list(c,q);reply.text=('Приход заявлен и ожидает сверки. ' if kind=='claim' else 'Строка сохранена. ')+reply.text
         reply.buttons.append([('Документы записи',f'docview:{kind}:{identity}')]);return self._learning_offer(c,feedback,reply)
 
@@ -265,6 +285,7 @@ class MediaFlow:
             if len(parts)!=3 or int(parts[2])!=q['version']:return Reply('Карточка устарела. /media — откройте текущую строку.')
             return self._media_save(c,q,index)
         if action=='mf':
+            if value=='currency':return Reply('Валюта берётся из настроек учёта. На карточке она не меняется.',[[('Назад к операции',f"mreview:{q['id']}:{index}:{q['version']}")]])
             if value not in ('amount','date','currency','merchant','description','account','destination','refund','category'):return Reply('Поле недоступно.')
             c.execute('UPDATE media_queues SET selected_index=%s,edit_field=%s,version=version+1 WHERE id=%s',(index,value,q['id']))
             if value=='category':
@@ -273,11 +294,11 @@ class MediaFlow:
             hints={'amount':'сумму','date':'дату ДД.ММ.ГГГГ, сегодня или вчера','currency':'код валюты документа: RUB, USD или EUR','merchant':'контрагента','description':'описание','account':'точное название своего счёта','destination':'точное название своего счёта получателя','refund':'ID исходной покупки из её карточки документов','category':'название категории из /categories'}
             return Reply('Введите '+hints[value]+'. /media — вернуться к списку.')
         if action=='mkind':
-            if value not in ('expense','income','refund','transfer'):return Reply('Тип недоступен.')
+            if value not in ('expense','income','opening','refund'):return Reply('Тип недоступен.')
             item['kind']=value;item['paid']=False;item['duplicate_confirmed']=False
             if value!='refund':item['refund']=None
             if value!='transfer':item['destination']=None
-            if value in ('income','transfer'):item['category_id']=None
+            if value in ('income','opening','transfer'):item['category_id']=None
         elif action=='msource':
             if value not in ('receipt','screenshot','terminal'):return Reply('Источник недоступен.')
             item['source_type']=value;item['paid']=False

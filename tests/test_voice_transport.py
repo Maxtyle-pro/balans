@@ -45,7 +45,8 @@ def test_explicit_voice_off_and_on(voices):
     send(s,user,'/voice off')
     asyncio.run(process_update(bot,s,update(user,next(UPDATES))))
     assert bot.downloads==0 and ai.transcriptions==0
-    assert '/voice on' in bot.messages[-1][0]
+    assert '/voice on' not in bot.messages[-1][0]
+    assert any(b.text=='Включить голос' for row in bot.messages[-1][1]['reply_markup'].inline_keyboard for b in row)
     send(s,user,'/voice on')
     asyncio.run(process_update(bot,s,update(user,next(UPDATES))))
     assert bot.downloads==1 and ai.transcriptions==1

@@ -10,7 +10,7 @@ from balans.domain import Reply
 WELCOME = ('💰 <b>Баланс — ваш ИИ-помощник</b>\n'
            'Расходы и доходы в одном чате.\n\n'
            '✍️ Напишите <code>Кофе 250</code>, отправьте голосовое или фото чека.\n'
-           '✨ Бот определит категорию — вам останется подтвердить запись.\n\n'
+           '✨ Бот определит категорию и автоматически запишет операцию. Исправить её можно кнопкой «Изменить».\n\n'
            '📊 <b>Отчёты каждый месяц и по запросу.</b>')
 DEMO_BADGE='Тестовая оплата · Stars не списываются.\n\n'
 ENTRY_MENU = [[('➕ Добавить расход', 'add')], [('💡 Как пользоваться', 'howto')]]
@@ -27,7 +27,7 @@ def trial_quotas(cfg):
 
 
 def quota_text(quotas):
-    return (f"{quotas['text']} ИИ-категоризаций, {quotas['image']} страниц чеков / изображений, "
+    return (f"{quotas['text']} ИИ-распознаваний текста, {quotas['image']} файлов чеков / изображений, "
             f"{quotas['voice'] / 60:g} минут голоса, {quotas['analysis']} ИИ-анализов отчётов")
 
 
@@ -39,6 +39,11 @@ class Onboarding:
         return moment.astimezone(ZoneInfo(zone)).strftime('%d.%m.%Y %H:%M')+f' ({zone})'
 
     def _welcome(self,c):
+        if not c.execute('SELECT currency_selected_at FROM user_settings WHERE user_id=actor_user_id()').fetchone()['currency_selected_at']:
+            reply=self._currency_picker(c)
+            reply.text=WELCOME+'\n\n'+reply.text
+            reply.parse_mode='HTML'
+            return reply
         cfg=self._billing_config(c)
         access=c.execute('SELECT billing_access() AS data').fetchone()['data']
         status=access['status'];text=(DEMO_BADGE if cfg.get('demo') else '')+WELCOME
@@ -87,8 +92,8 @@ class Onboarding:
         text=(f"{cfg['trial_days']} дней бесплатно\nЗатем — {cfg['stars']} Stars за 30 дней.\n\n"
               'Платную подписку вы подключаете сами. После пробного периода автоматического списания нет. '
               'После оплаты — продление каждые 30 дней, которое можно отключить.\n\n'
-              'Нажимая «Понятно, начать», вы принимаете условия, включаете ИИ-категоризацию '
-              '(описания и категории передаются в OpenAI) и ежемесячный отчёт в этот чат. '
+              'Нажимая «Понятно, начать», вы принимаете условия, включаете ИИ-распознавание текста '
+              '(текст сообщения, валюта учёта и категории передаются в OpenAI) и ежемесячный отчёт в этот чат. '
               'Отключение: /ai off и /notify monthly off.\n'
               f"Условия: {cfg['terms_url']}")
         if policy['terms_url'] and policy['terms_url']!=cfg['terms_url']:text+='\nУсловия сервиса: '+policy['terms_url']

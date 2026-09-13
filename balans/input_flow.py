@@ -1,4 +1,5 @@
 from datetime import date
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from uuid import UUID
 from psycopg.types.json import Jsonb
@@ -33,20 +34,30 @@ class InputFlow:
 
     def _text_create_draft(self,c,user,sent,row,item):
         c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,amount,description,occurred_on,timezone_snapshot,source_sent_at,step,flow,kind) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'confirm','auto',%s)",
-                  (row['id'],user,row['account_id'],item['amount'],item['description'],item['date'],row['timezone'],sent,item['kind']))
+                  (row['id'],user,row['account_id'],item['amount'],item['description'],item['date'] or sent.astimezone(ZoneInfo(row['timezone'])).date(),row['timezone'],sent,'income' if item['kind']=='incoming' else item['kind']))
         d=self._draft(c)
-        return self._suggest(c,d) if item['kind']=='expense' else self._finance_prompt(c,d)
+        c.execute('UPDATE operation_drafts SET automatic_capture=%s,capture_warnings=%s WHERE id=%s',(self._capture_enabled(c),item.get('capture_warnings',[]),d['id']))
+        d=self._draft(c)
+        if item.get('recognized'):
+            c.execute('UPDATE operation_drafts SET category_id=%s,capture_kind_pending=%s WHERE id=%s',(UUID(item['category_id']) if item.get('category_id') and item['kind']=='expense' else None,item['kind']=='incoming',d['id']))
+            if not d['automatic_capture']:
+                c.execute("UPDATE operation_drafts SET step=CASE WHEN amount IS NULL THEN 'amount' WHEN kind='expense' AND category_id IS NULL THEN 'category' ELSE 'confirm' END WHERE id=%s",(d['id'],))
+            reply=self._prompt(c,self._draft(c));reply.capture_draft_id=str(d['id']);return reply
+        reply=self._suggest(c,d) if item['kind']=='expense' else (self._capture_draft(c,d) or self._finance_prompt(c,d))
+        reply.capture_draft_id=str(d['id'])
+        return reply
 
     def _free_text(self,c,user,text,sent):
         batch=self._input_batch(c)
-        if batch:return self._batch_card(c,batch)
+        if batch:return Reply('Продолжаю список…',capture_batch_id=str(batch['id'])) if self._capture_enabled(c) else self._batch_card(c,batch)
         if self._voice_busy(c) or c.execute("SELECT id FROM receipt_batches WHERE state IN ('collecting','processing')").fetchone():return Reply('Сначала завершите обработку или /cancel.')
+        if self._capture_enabled(c) or self.text_ai.available:return self._text_recognize(c,user,text,sent)
         row=self._account_context(c);items=parse_items(text,sent,row['timezone'])
         if any(item['kind']=='income' for item in items) and c.execute("SELECT kind='shared' AS shared FROM workspaces WHERE id=current_workspace()").fetchone()['shared']:
             return Reply('Получение в совместном бюджете требует сверки: /funds — открытые выдачи; /claim сумма | дата | источник | назначение. Расходы отправьте отдельно.')
         if len(items)==1:return self._text_create_draft(c,user,sent,row,items[0])
         batch=c.execute('INSERT INTO input_batches(workspace_id,author_user_id,account_id,timezone_snapshot,source_sent_at,items) VALUES(%s,%s,%s,%s,%s,%s) RETURNING *',(row['id'],user,row['account_id'],row['timezone'],sent,Jsonb(items))).fetchone()
-        return self._batch_card(c,batch)
+        return Reply('Записываю операции…',capture_batch_id=str(batch['id'])) if self._capture_enabled(c) else self._batch_card(c,batch)
 
     def _input_callback(self,c,user,callback,sent):
         if callback.startswith('edit:'):
@@ -55,7 +66,10 @@ class InputFlow:
             if d and batch and str(d['id'])==identity and d['version']==int(version) and any(x.get('draft_id')==identity for x in batch['items']):
                 c.execute('UPDATE operation_drafts SET version=version+1 WHERE id=%s',(d['id'],))
                 return self._finance_prompt(c,self._draft(c))
-        if callback=='tqueue':return self._batch_card(c,self._input_batch(c))
+        if callback=='tqueue':
+            batch=self._input_batch(c)
+            if batch and self._capture_enabled(c):return Reply('Продолжаю…',capture_batch_id=str(batch['id']))
+            return self._batch_card(c,batch)
         action,_,raw=callback.partition(':')
         if action not in ('titem','tdrop'):return None
         identity,_,index=raw.partition(':');index=int(index)
@@ -77,9 +91,9 @@ class InputFlow:
         if self._draft(c):return Reply('Сначала завершите текущий черновик. /add — показать; /cancel — отменить.')
         row={'id':batch['workspace_id'],'account_id':batch['account_id'],'timezone':batch['timezone_snapshot']}
         reply=self._text_create_draft(c,user,batch['source_sent_at'],row,item)
-        item['draft_id']=str(self._draft(c)['id'])
+        item['draft_id']=reply.capture_draft_id or str(self._draft(c)['id'])
         c.execute('UPDATE input_batches SET items=%s WHERE id=%s',(Jsonb(batch['items']),batch['id']))
-        reply.text+='\n/batch — остальные строки.'
+        if not self._capture_enabled(c):reply.text+='\n/batch — остальные строки.'
         return reply
 
     def _input_command(self,c,user,command,arg,sent):

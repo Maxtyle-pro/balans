@@ -74,7 +74,7 @@ def render_pdf(snapshot):
     def p(text,style=normal):return Paragraph(escape(str(text)).replace('\n','<br/>'),style)
     summary=snapshot['summary'];previous=snapshot['previous'];story=[]
     story += [p('Баланс / Финансовый отчёт',title),p(f"{snapshot['start']} - {snapshot['end']} | {currency} | {snapshot['timezone']}"),
-              p(snapshot.get('workspace','Личный бюджет')+' / доступные счета',small),Spacer(1,12),p(fmt(summary['total'])+' '+currency,title),
+              p(snapshot.get('workspace','Личный бюджет') ,small),Spacer(1,12),p(fmt(summary['total'])+' '+currency,title),
               p(f"Операций: {summary['count']}   |   В среднем за день: {fmt(summary['daily_average'])} {currency}")]
     if snapshot.get('filter_member'):story += [p('Выборка по участнику: '+str(snapshot['filter_member']),small)]
     story += [p(f"Доходы: {fmt(summary.get('income','0'))} {currency} | Возвраты: {fmt(summary.get('refunds','0'))} {currency} | Чистые расходы: {fmt(summary.get('net_expenses',summary['total']))} {currency}",small)]
@@ -86,7 +86,7 @@ def render_pdf(snapshot):
               p(f"Период сравнения: {snapshot['previous_start']} - {snapshot['previous_end']}."),
               p(f"Расходы периода сравнения: {fmt(previous['total'])} {currency}. Изменение: {fmt(snapshot['delta'])} {currency}."),
               p('Процент изменения: '+(snapshot['delta_percent']+'%' if snapshot['delta_percent'] is not None else 'не вычисляется: в периоде сравнения нет расходов.')),
-              p('Графики показывают расходы до возвратов. Переводы между своими счетами и начальные остатки исключены из доходов и расходов. Наличие записей не означает полноту учёта.',small)]
+              p('Графики показывают расходы до возвратов. Начальный остаток не считается доходом. Наличие записей не означает полноту учёта.',small)]
     top=sorted([r for r in snapshot['rows'] if r.get('kind','expense')=='expense'],key=lambda r:amount(r['amount']),reverse=True)[:20]
     if top:
         story += [p('До 20 крупнейших операций',heading)]
@@ -100,7 +100,7 @@ def render_pdf(snapshot):
         story += [PageBreak(),p('Совместный бюджет',title),p(snapshot.get('workspace','')),p('Деньги в пути на конец периода: '+fmt(funds['transit'])+' '+currency,heading)]
         for member in funds['members']:
             story += [p('Участник '+member['participant'],heading),p(f"На начало: {fmt(member['opening'])} {currency} | На конец: {fmt(member['closing'])} {currency} | Заявленный остаток: {fmt(member['declared'])} {currency}"),p(f"Получено: {fmt(member['received'])} {currency}; возвращено руководителю: {fmt(member['returned'])} {currency}; в пути к участнику: {fmt(member['transit'])} {currency}; несверенные приходы: {fmt(member['pending'])} {currency}. Расходы периода без принятия: {fmt(member['unreviewed'])} {currency}.",small)]
-    story += [Spacer(1,14),p('Отчёт является снимком учётных данных на '+snapshot['created_at']+'. Полный список доступен в CSV и Google Sheets. AI-анализ вызывается отдельно в боте.',small)]
+    story += [Spacer(1,14),p('Отчёт является снимком учётных данных на '+snapshot['created_at']+'. Полный список доступен в CSV. AI-анализ вызывается отдельно в боте.',small)]
     def footer(canvas,doc):
         canvas.setFont('Balans',8);canvas.setFillColor(MUTED)
         canvas.drawString(50,28,'Баланс | Финансовый отчёт');canvas.drawRightString(A4[0]-50,28,str(doc.page))

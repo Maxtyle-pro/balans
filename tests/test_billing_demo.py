@@ -14,7 +14,7 @@ USERS=count(230000000)
 
 
 def enable(s,db):
-    u=next(USERS);send(s,u,'/start');configure(db[0],u)
+    u=next(USERS);send(s,u,'/start');send(s,u,callback='usercurrency:RUB');configure(db[0],u)
     return u
 
 

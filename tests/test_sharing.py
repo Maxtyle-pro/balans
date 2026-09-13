@@ -75,7 +75,7 @@ def test_shared_report_member_scope_and_revision_snapshot(service,database):
     operation=str(query(database,u,"SELECT id FROM operations WHERE kind='expense'")[0][0])
     edit=send(s,u,callback='fedit:'+operation)
     send(s,u,callback=button(edit,'Сумма'));edit=send(s,u,'6000');send(s,u,callback=button(edit,'Сохранить изменения'))
-    audit=send(s,owner,callback=button(card,'История изменений CSV'))
+    audit=send(s,owner,callback=button(card,'PDF с графиками').replace('rpdf:','raudit:'))
     raw=base64.b64decode(audit.generated_document).decode()
     assert '6500' in raw and '6000' not in raw
 

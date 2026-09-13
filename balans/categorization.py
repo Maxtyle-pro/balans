@@ -38,10 +38,14 @@ class Categorization:
         consent = c.execute('SELECT ai_enabled FROM user_settings WHERE user_id=actor_user_id()').fetchone()['ai_enabled']
         if not self.ai.available or not consent or not normalize(d['description'] or ''):
             c.execute("UPDATE operation_drafts SET step='category',category_source='fallback' WHERE id=%s", (d['id'],))
+            if d['automatic_capture']:return self._prompt(c,self._draft(c))
             reply = self._category_menu(c, self._draft(c))
             prefix = 'AI сейчас недоступен; выберите категорию вручную.' if consent else 'AI выключен. /ai — включить определение категории по описанию.'
             reply.text = prefix + '\n\n' + reply.text
             return reply
+        if d['automatic_capture'] and (quota:=self._quota_preflight(c,'text')):
+            c.execute("UPDATE operation_drafts SET step='category',category_source='fallback' WHERE id=%s",(d['id'],))
+            reply=self._prompt(c,self._draft(c));reply.additional_replies.append(asdict(quota));return reply
         request = {'description':d['description'], 'categories':[{'id':str(cat['id']), 'name':cat['name']} for cat in self._categories(c, d['workspace_id'])]}
         job = c.execute('INSERT INTO ai_jobs(workspace_id,author_user_id,draft_id,draft_version,model,prompt_version,request) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id',
                         (d['workspace_id'], d['author_user_id'], d['id'], d['version'], self.ai.model, PROMPT_VERSION, Jsonb(request))).fetchone()['id']
@@ -98,7 +102,7 @@ class Categorization:
                        'category_review' if category else 'category', d['id']))
             reply = self._prompt(c, self._draft(c))
             state = 'succeeded' if not result.error_code else 'failed'
-            if not category:
+            if not category and not d['automatic_capture']:
                 reply.text = 'Не удалось уверенно определить категорию. Выберите её вручную.\n\n' + reply.text
         c.execute('UPDATE ai_jobs SET state=%s,category_id=%s,confidence=%s,error_code=%s,response_id=%s,input_tokens=%s,output_tokens=%s,finished_at=now(),reply=%s WHERE id=%s',
                   (state, UUID(result.category_id) if result.category_id and valid else None, result.confidence,
@@ -228,11 +232,12 @@ class Categorization:
                 enabled=arg=='on'
                 c.execute("UPDATE user_settings SET ai_enabled=%s,ai_consent_version=CASE WHEN %s THEN 'category-ai-v1' ELSE ai_consent_version END,ai_consented_at=CASE WHEN %s THEN now() ELSE ai_consented_at END WHERE user_id=%s",(enabled,enabled,enabled,user_id))
                 if not enabled:
+                    c.execute("UPDATE text_jobs SET state='cancelled',reply=%s WHERE state IN ('queued','running')",(Jsonb(asdict(Reply('Распознавание текста отменено.'))),))
                     c.execute("UPDATE operation_drafts SET step='category',category_source='fallback',version=version+1 WHERE state='pending' AND step='ai_pending'")
-                return Reply('AI-категоризация включена для новых описаний.' if enabled else 'AI-категоризация выключена. Личные правила и ручной выбор доступны.')
+                return Reply('ИИ-распознавание текста включено.' if enabled else 'ИИ-распознавание текста выключено. Ручной ввод доступен.')
             enabled=c.execute('SELECT ai_enabled FROM user_settings WHERE user_id=%s',(user_id,)).fetchone()['ai_enabled']
-            return Reply(('AI включён.' if enabled else 'AI выключен.')+'\nПри включении описание покупки и список категорий отправляются в OpenAI для подбора категории. Сумма, Telegram ID и история операций не передаются. '
-                         'Категория всегда подтверждается вами. Можно отключить /ai off.',[[('Выключить' if enabled else 'Включить AI','ai_off' if enabled else 'ai_on')]])
+            return Reply(('AI включён.' if enabled else 'AI выключен.')+'\nПри включении текст сообщения, дата сообщения, валюта учёта и список категорий отправляются в OpenAI для определения типа, суммы, даты и категории операции. Telegram ID и история операций не передаются. '
+                         'Распознанную запись можно исправить кнопкой «Изменить». ИИ можно отключить кнопкой ниже.',[[('Выключить' if enabled else 'Включить AI','ai_off' if enabled else 'ai_on')]])
         if command=='/category':
             d=self._draft(c)
             if not d:

@@ -21,10 +21,7 @@ from balans.ai import CategoryAI
 from balans.receipt_media import BoundedBuffer, MAX_FILE_BYTES, MediaError
 
 log = logging.getLogger('balans')
-COMMANDS = [('privacy','Приватность и согласия'),('retention','Хранение личных оригиналов'),('delete','Удалить личный профиль'),('exchange','Обмен между валютами'),('fx','Ручной курс'),('subscription','Подписка и оплата'),('paysupport','Поддержка платежей'),('budget','Лимиты расходов'),('notify','Уведомления'),('media','Строки из изображений'),('reviewqueue','Очередь проверки'),('docquota','Квоты документов'),('docs','Документы записи'),('attach','Прикрепить документ'),('review','Проверка записи'),('correction','Запрос исправления'),('docpolicy','Правила документов'),('periodclose','Закрыть период'),('periodopen','Открыть период'),('funds','Выдачи и сверка'),('issue','Выдать средства'),('returnfunds','Возврат руководителю'),('claim','Заявить приход'),('receive','Получение денег'),('reconcile','Сверка прихода'),('dispute','Сообщить расхождение'),('start','Главное меню'),('workspaces','Мои бюджеты'),('workspace','Создать общий бюджет'),('invite','Пригласить участника'),('join','Вступить в бюджет'),('members','Участники и заявки'),('batch','Список операций'),('search','Поиск истории'),('categories','Свои категории'),('add','Добавить расход'),('history','История расходов'),
-            ('report','Отчёты'),('pdf','PDF с графиками'),('analyze','AI-анализ трат'),('csv','Экспорт CSV'),('sheets','Google Sheets'),('accounts','Счета и остатки'),('account','Создать счёт'),('income','Записать доход'),('transfer','Перевести между счетами'),('opening','Начальный остаток'),('settings','Настройки'),
-            ('voice','Голосовой ввод'),('receipts','Фото и PDF-чек'),('ai','AI-категоризация'),('category','Категория черновика'),('rules','Личные правила'),('rule','Правило по словам'),('manual','Ручной ввод'),
-            ('cancel','Отменить черновик'),('help','Помощь'),('support','Поддержка')]
+COMMANDS = [('start','Открыть главное меню')]
 
 
 async def process_update(bot, service, update):
@@ -91,6 +88,8 @@ async def deliver_reply(bot,chat_id,reply,service=None):
         [InlineKeyboardButton(text=label, callback_data=data) for label, data in row]
         for row in reply.buttons]) if reply.buttons else None
     if reply.text:await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
+    for extra in reply.additional_replies:
+        await deliver_reply(bot,chat_id,Reply(**extra),service)
     for part in reply.messages:
         await deliver_reply(bot,chat_id,Reply(part),service)
     if reply.generated_document:
@@ -108,7 +107,7 @@ async def deliver_reply(bot,chat_id,reply,service=None):
 
 
 async def receive_voice_file(bot,service,update,message,sender):
-    gate=await asyncio.to_thread(service.voice_preflight,sender.id,bot.id,update.update_id)
+    gate=await asyncio.to_thread(service.voice_preflight,sender.id,bot.id,update.update_id,message.voice.duration)
     if gate:
         return gate
     voice=message.voice

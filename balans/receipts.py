@@ -18,6 +18,8 @@ class Receipts:
         return Reply('Обработка чеков и скриншотов выключена. /receipts on — включить; /manual — ручной ввод.')
 
     def _receipt_gate(self,c):
+        quota=self._quota_preflight(c,'image')
+        if quota:return quota
         if self._media_queue(c):return Reply('Сначала завершите список изображений: /media; /media cancel — отменить оставшееся.')
         settings=c.execute('SELECT receipts_enabled FROM user_settings WHERE user_id=actor_user_id()').fetchone()
         if not settings or not settings['receipts_enabled']:
@@ -97,7 +99,8 @@ class Receipts:
     def receipt_error(self,telegram_id,bot_id,update_id,text):
         with self._actor_transaction(telegram_id) as c:
             user_id=c.execute('SELECT bootstrap() AS id').fetchone()['id']
-            reply=Reply(text)
+            kind=next((k for k in ('text','image','voice','analysis') if f'({k})' in text),None)
+            reply=self._quota_card(c,kind) if kind and 'Квота AI исчерпана' in text else Reply(text)
             c.execute('INSERT INTO telegram_updates(bot_id,update_id,user_id,response) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',(bot_id,update_id,user_id,Jsonb(asdict(reply))))
             return self._safe_cached(c,c.execute('SELECT response,workspace_id FROM telegram_updates WHERE bot_id=%s AND update_id=%s',(bot_id,update_id)).fetchone())
 
@@ -276,15 +279,15 @@ class Receipts:
                     day=None;result['warnings'].append('Дата в будущем — укажите верную дату вручную.')
             if not day:
                 result['warnings'].append('Дата не прочитана. Подтвердите дату вручную; «сегодня» относится к моменту отправки чека.')
-            description=(result['merchant'] or 'Покупка по чеку')
+            description=(result['merchant'] or '')
             if result['items']:
-                description+=' · '+', '.join(line['name'] for line in result['items'][:2])
+                description+=(' · ' if description else '')+', '.join(line['name'] for line in result['items'][:2])
             category=result['category_id']
             allowed={str(cat['id']) for cat in self._categories(c,batch['workspace_id'])}
             if category not in allowed:
                 category=None
             draft=c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,amount,description,occurred_on,category_id,timezone_snapshot,source_sent_at,step,flow,category_source,receipt_batch_id,merchant,receipt_currency) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,'confirm','manual','ai',%s,%s,%s) RETURNING *",
-                            (batch['workspace_id'],batch['author_user_id'],batch['account_id'],number(result['total']),description[:500],day,UUID(category) if category else None,batch['timezone_snapshot'],batch['source_sent_at'],batch['id'],result['merchant'],result['currency'])).fetchone()
+                            (batch['workspace_id'],batch['author_user_id'],batch['account_id'],number(result['total']),description[:500],day,UUID(category) if category else None,batch['timezone_snapshot'],batch['source_sent_at'],batch['id'],result['merchant'],result['currency'] or self._account_currency(c,batch['account_id']))).fetchone()
             c.execute('UPDATE operation_drafts SET external_reference_hash=%s,source_type=%s WHERE id=%s',(result.get('reference_hash'),'receipt',draft['id']))
             rule=self._rule(c,draft)
             if rule:
@@ -293,6 +296,7 @@ class Receipts:
                 c.execute('INSERT INTO receipt_items(workspace_id,author_user_id,batch_id,line_no,name,quantity,unit_price,line_total,discount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                           (batch['workspace_id'],batch['author_user_id'],batch['id'],index,line['name'],number(line['quantity'],True),number(line['unit_price']),number(line['line_total']),number(line['discount'])))
             c.execute('UPDATE receipt_batches SET result=%s WHERE id=%s',(Jsonb(result),batch['id']))
+            c.execute('UPDATE operation_drafts SET automatic_capture=%s WHERE id=%s',(self._capture_enabled(c),draft['id']))
             state='ready';reply=self._receipt_prompt(c,self._draft(c))
         c.execute('UPDATE receipt_batches SET state=%s,result=%s,reply=%s,error_code=%s,response_id=%s,input_tokens=%s,output_tokens=%s WHERE id=%s',
                   (state,Jsonb(result) if result else None,Jsonb(asdict(reply)),extraction.error_code,extraction.response_id,extraction.input_tokens,extraction.output_tokens,batch['id']))
@@ -313,13 +317,17 @@ class Receipts:
         return f"{line['line_no']}. {line['name']}{details} — {amount}"
 
     def _receipt_prompt(self,c,d):
+        captured=self._capture_draft(c,d)
+        if captured is not None:return captured
         from balans.domain import CURRENCY
         CURRENCY.set(self._account_currency(c,d['account_id']))
         field=d['receipt_edit_field']
         if field=='amount' or d['amount'] is None:
-            return Reply('Итог покупки в валюте выбранного счёта: введите сумму вручную, например 850,50. /cancel — отмена.')
+            return Reply('Итог покупки в валюте учёта: введите сумму вручную, например 850,50. /cancel — отмена.')
         if field=='currency' or d['receipt_currency'] is None:
-            return Reply('Валюта чека не подтверждена. Если это рубли, отправьте RUB. Иная валюта сейчас не поддерживается; /cancel — отмена.')
+            currency=self._account_currency(c,d['account_id'])
+            c.execute('UPDATE operation_drafts SET receipt_currency=%s,receipt_edit_field=NULL,version=version+1 WHERE id=%s',(currency,d['id']))
+            return self._receipt_prompt(c,self._draft(c))
         if field=='date' or d['occurred_on'] is None:
             return Reply('Проверьте дату покупки: отправьте ДД.ММ.ГГГГ, «сегодня» или «вчера». '
                          f"Дата отправки чека: {d['source_sent_at'].astimezone(ZoneInfo(d['timezone_snapshot'])):%d.%m.%Y}.")

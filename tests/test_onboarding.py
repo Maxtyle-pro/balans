@@ -18,6 +18,7 @@ def test_start_terms_and_activation_once(database,billing):
     s=Service(database[1],ai=FakeAI());u=next(USERS)
     try:
         r=send(s,u,'/start')
+        r=send(s,u,callback=button(r,'₽ Рубли'))
         assert len(r.text)<400 and not r.messages
         assert [label for row in r.buttons for label,_ in row]==['🎁 Начать 7 дней бесплатно','💡 Как пользоваться']
         assert query(database,u,'SELECT trial_started_at FROM billing_accounts')==[(None,)]
@@ -43,7 +44,7 @@ def test_start_terms_and_activation_once(database,billing):
         assert 'сохранён' in r.text
         assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
         card=send(s,u,'/subscription')
-        assert 'ИИ-категоризации: 0 из 1' in card.text
+        assert 'ИИ-распознавания текста: 0 из 1' in card.text
         assert not query(database,u,'SELECT charge_id FROM billing_payments')
     finally:s.close()
 
@@ -66,12 +67,13 @@ def test_trial_keeps_deadline_and_snapshot_when_tariff_changes(service,database,
     before=query(database,u,'SELECT trial_until,trial_quotas FROM billing_accounts')[0]
     with psycopg.connect(database[0]) as c:c.execute('UPDATE balans.billing_config SET trial_days=20,trial_text_quota=500')
     r=send(s,u,'/subscription')
-    assert 'ИИ-категоризации: 1 из 1' in r.text
+    assert 'ИИ-распознавания текста: 1 из 1' in r.text
     assert query(database,u,'SELECT trial_until,trial_quotas FROM billing_accounts')[0]==before
 
 
 def test_disabled_billing_and_short_help(service,database):
     u=next(USERS);r=send(service,u,'/start')
+    r=send(service,u,callback=button(r,'₽ Рубли'))
     assert 'бесплатно' not in ' '.join(x for row in r.buttons for x,_ in row)
     r=send(service,u,callback=button(r,'💡 Как пользоваться'))
     assert len(r.text)<700 and not r.messages
@@ -93,11 +95,11 @@ def test_subscription_uses_paid_period_and_separate_analysis_quota(database,bill
     s=Service(database[1],ai=FakeAI());u=next(USERS)
     try:
         start_trial(s,u);send(s,u,'Кофе 250');send(s,u,'/cancel')
-        assert 'ИИ-категоризации: 0 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 0 из 1' in send(s,u,'/subscription').text
         identity=invoice(s,u);s.record_payment(u,payment(identity,charge=f'period-{u}'))
-        assert 'ИИ-категоризации: 1 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 1 из 1' in send(s,u,'/subscription').text
         send(s,u,'Кофе 500');send(s,u,'/cancel')
-        assert 'ИИ-категоризации: 0 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 0 из 1' in send(s,u,'/subscription').text
         with s._actor_transaction(u) as c:
             report=s._report_snapshot(c,query(database,u,'SELECT id FROM users')[0][0],'',datetime.now(timezone.utc))
             c.execute("INSERT INTO report_jobs(workspace_id,author_user_id,report_id,kind) VALUES(current_workspace(),actor_user_id(),%s,'analysis')",(report['id'],))
@@ -139,14 +141,14 @@ def test_renewal_resets_quota_but_calendar_month_does_not(database,billing):
         s.record_payment(u,payment(identity,charge=f'first-{u}',end=end))
         send(s,u,'/ai on')
         send(s,u,'Кофе 250');send(s,u,'/cancel')
-        assert 'ИИ-категоризации: 0 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 0 из 1' in send(s,u,'/subscription').text
         # Calendar bucket is deliberately different; entitlement period remains unchanged.
         with psycopg.connect(database[0]) as c:
             c.execute("SET LOCAL balans.billing_worker='on'")
             c.execute("UPDATE balans.quota_reservations SET created_at=now()-interval '1 month' WHERE sponsor_id=(SELECT user_id FROM balans.billing_accounts WHERE telegram_user_id=%s)",(u,))
-        assert 'ИИ-категоризации: 0 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 0 из 1' in send(s,u,'/subscription').text
         s.record_payment(u,payment(identity,charge=f'next-{u}'))
-        assert 'ИИ-категоризации: 1 из 1' in send(s,u,'/subscription').text
+        assert 'ИИ-распознавания текста: 1 из 1' in send(s,u,'/subscription').text
     finally:s.close()
 
 
@@ -159,19 +161,19 @@ def test_shared_participant_sees_owner_usage_and_cannot_activate_owner(service,d
     assert 'владелец' in send(s,member,callback=button(offer,'Понятно, начать')).text
     start_trial(s,owner)
     owner_card=send(s,owner,'/subscription');member_card=send(s,member,'/subscription')
-    assert 'ИИ-категоризации: 1 из 1' in owner_card.text and 'ИИ-категоризации: 1 из 1' in member_card.text
+    assert 'ИИ-распознавания текста: 1 из 1' in owner_card.text and 'ИИ-распознавания текста: 1 из 1' in member_card.text
     assert 'владелец' in send(s,member,callback='billdetails').text
 
 
-def test_pdf_quota_counts_pages_before_calling_ai(receipts,database,billing):
+def test_pdf_quota_counts_files_after_success(receipts,database,billing):
     from receipt_fixtures import pdf_bytes
     s,ai,_=receipts;u=next(USERS);start_trial(s,u)
     r=s.receive_receipt(u,42,90001001,datetime.now(timezone.utc),'pages',pdf_bytes(pages=3),'document')
     r=send(s,u,callback=button(r,'Распознать один чек'))
-    assert 'Квота' in r.text and not ai.calls
-    assert not query(database,u,'SELECT job_id FROM quota_reservations')
+    assert len(ai.calls)==1
+    assert query(database,u,"SELECT units FROM quota_reservations WHERE kind='image'")==[(1,)]
     send(s,u,'/cancel')
     r=s.receive_receipt(u,42,90001002,datetime.now(timezone.utc),'pages2',pdf_bytes(pages=2),'document')
     send(s,u,callback=button(r,'Распознать один чек'))
-    assert len(ai.calls)==1
-    assert query(database,u,"SELECT units FROM quota_reservations WHERE kind='image'")==[(2,)]
+    assert len(ai.calls)==2
+    assert query(database,u,"SELECT sum(units) FROM quota_reservations WHERE kind='image'")==[(2,)]

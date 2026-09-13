@@ -79,7 +79,8 @@ def test_explicit_receipts_off_and_on(receipts):
     send(s,user,'/receipts off')
     asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
     assert bot.downloads==0
-    assert '/receipts on' in bot.messages[-1][0]
+    assert '/receipts on' not in bot.messages[-1][0]
+    assert any(b.text=='Включить чеки' for row in bot.messages[-1][1]['reply_markup'].inline_keyboard for b in row)
     send(s,user,'/receipts on')
     asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
     assert bot.downloads==1

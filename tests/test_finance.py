@@ -31,9 +31,9 @@ def test_income_opening_transfer_and_reports(service,database):
 
 def test_account_selection_freezes_draft(service,database):
     s=service;u=next(USERS);card=send(s,u,'/account Карта')
-    send(s,u,callback=button(card,'Использовать этот счёт'))
+    query(database,u,"UPDATE user_settings SET default_account_id=(SELECT id FROM accounts WHERE name='Карта') RETURNING user_id")
     save=draft(s,u,'100')
-    accounts=send(s,u,'/accounts');send(s,u,callback=button(accounts,'Основной'))
+    query(database,u,"UPDATE user_settings SET default_account_id=(SELECT id FROM accounts WHERE name='Основной') RETURNING user_id")
     send(s,u,callback=save)
     assert balances(database,u)=={'Основной':Decimal(0),'Карта':Decimal(-100)}
 

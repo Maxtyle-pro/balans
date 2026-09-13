@@ -15,6 +15,9 @@ class Notifications:
 
     def plan_notifications(self,now=None):
         now=now or datetime.now(timezone.utc)
+        if now>=getattr(self,'_next_retention_scan',now):
+            with self.pool.connection() as retention,retention.transaction():retention.execute('SELECT balans.plan_retention_notices()')
+            self._next_retention_scan=now+timedelta(minutes=15)
         with self.pool.connection() as c,c.transaction():
             c.execute("SELECT set_config('balans.notification_worker','on',true)")
             jobs=c.execute('SELECT id,telegram_user_id,workspace_id FROM balans.notification_preferences WHERE enabled AND NOT blocked AND next_check_at<=%s ORDER BY next_check_at FOR UPDATE SKIP LOCKED LIMIT 100',(now,)).fetchall()
@@ -123,19 +126,23 @@ class Notifications:
             if not n:return None
             p=c.execute('SELECT * FROM notification_preferences WHERE workspace_id=%s',(n['workspace_id'],)).fetchone()
             accessible=c.execute('SELECT id FROM workspaces WHERE id=%s',(n['workspace_id'],)).fetchone()
-            permitted=p and p['enabled'] and not p['blocked'] and accessible and n['expires_at']>now
+            service_notice=n['kind'] in ('retention','quota')
+            permitted=accessible and n['expires_at']>now and ((not p or not p['blocked']) if service_notice else p and p['enabled'] and not p['blocked'])
             if permitted:
-                permitted= True if n['kind']=='billing' else p['budget_alerts'] if n['kind']=='budget' else p[n['kind']] if n['kind'] in ('reminder','weekly','monthly') else p['shared_mode']!='off'
+                permitted= True if service_notice or n['kind']=='billing' else p['budget_alerts'] if n['kind']=='budget' else p[n['kind']] if n['kind'] in ('reminder','weekly','monthly') else p['shared_mode']!='off'
             if not permitted:
                 c.execute("UPDATE notification_outbox SET state='cancelled' WHERE id=%s",(identity,));return None
             zone=c.execute('SELECT timezone FROM user_settings WHERE user_id=actor_user_id()').fetchone()['timezone']
-            allowed=next_allowed(now,p['quiet_start'],p['quiet_end'],zone)
+            allowed=next_allowed(now,p['quiet_start'],p['quiet_end'],zone) if p else now
             if allowed>now:
                 c.execute("UPDATE notification_outbox SET state='pending',next_attempt_at=%s WHERE id=%s",(allowed,identity));return None
             return n
 
     def finish_notification(self,actor,identity,state,retry_at=None):
         with self._actor_transaction(actor) as c:
+            if state=='sent':
+                notice=c.execute("SELECT entity_id FROM notification_outbox WHERE id=%s AND kind='retention' AND state='sending'",(identity,)).fetchone()
+                if notice:c.execute('SELECT mark_retention_notice(%s)',(notice['entity_id'],))
             c.execute("UPDATE notification_outbox SET state=%s,next_attempt_at=coalesce(%s,next_attempt_at) WHERE id=%s AND state='sending'",(state,retry_at,identity))
 
     def notifications_blocked(self,actor,blocked=True):
@@ -150,6 +157,11 @@ class Notifications:
                 c.execute('UPDATE notification_preferences SET monthly=false WHERE id=%s',(p['id'],))
                 c.execute("UPDATE notification_outbox SET state='cancelled' WHERE workspace_id=current_workspace() AND kind='monthly' AND state='pending'")
             return self._monthly_settings(c)
+        selected=None
+        if callback.startswith('nquota:'):
+            _,identity,selected=callback.split(':')
+            if selected not in ('text','image','voice','analysis','upgrade'):return Reply('Пакет недоступен.')
+            callback='nopen:'+identity
         if not callback.startswith('nopen:'):return None
         n=c.execute('SELECT * FROM notification_outbox WHERE id=%s',(UUID(callback[6:]),)).fetchone()
         if not n or not c.execute('SELECT id FROM workspaces WHERE id=%s',(n['workspace_id'],)).fetchone():return Reply('Доступ к уведомлению прекращён.')
@@ -158,6 +170,8 @@ class Notifications:
             if self._workspace_busy(c):return Reply('Сначала завершите текущий ввод; затем откройте уведомление снова.')
             c.execute('UPDATE user_settings SET selected_workspace_id=%s,default_account_id=NULL WHERE user_id=%s',(n['workspace_id'],user))
         kind=n['entity_kind']
+        if n['kind']=='retention':return self._retention_card(c,n['entity_id'])
+        if n['kind']=='quota':return self._addon_offer(c,selected) if selected else self._quota_card(c,kind)
         if kind=='billing':return self._subscription_card(c)
         if kind in ('operation','transfer','claim'):return self._documents_command(c,user,'/docs',f"{kind} {n['entity_id']}",sent)
         if kind=='report':
@@ -179,7 +193,10 @@ async def notification_loop(bot,service):
                 n=await asyncio.to_thread(service.prepare_notification,actor,identity)
                 if not n:continue
                 try:
-                    await bot.send_message(actor,n['message'],reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть',callback_data=f'nopen:{identity}')],[InlineKeyboardButton(text='⚙️ Уведомления',callback_data='ui:go:notify'),InlineKeyboardButton(text='☰ Все действия',callback_data='ui:menu')]]))
+                    if n['kind']=='quota':
+                        markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Добавить пакет',callback_data=f"nquota:{identity}:{n['entity_kind']}")],[InlineKeyboardButton(text='Выбрать тариф',callback_data=f'nquota:{identity}:upgrade')],[InlineKeyboardButton(text='Ввести вручную',callback_data='ui:go:manual')]])
+                    else:markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть',callback_data=f'nopen:{identity}')],[InlineKeyboardButton(text='⚙️ Уведомления',callback_data='ui:go:notify'),InlineKeyboardButton(text='☰ Все действия',callback_data='ui:menu')]])
+                    await bot.send_message(actor,n['message'],reply_markup=markup)
                 except TelegramForbiddenError:
                     await asyncio.to_thread(service.notifications_blocked,actor)
                     await asyncio.to_thread(service.finish_notification,actor,identity,'cancelled')

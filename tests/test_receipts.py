@@ -140,8 +140,7 @@ def test_missing_fields_are_requested(receipts,database):
     ai.changes.pop('category_id')
     card=review(s,user)
     assert 'введите сумму' in card.text
-    assert 'Валюта' in send(s,user,'123,45').text
-    assert 'дату покупки' in send(s,user,'RUB').text
+    assert 'дату покупки' in send(s,user,'123,45').text
     assert 'Продавец:' in send(s,user,'сегодня').text
     saved=save(s,user,send(s,user,'/add'))
     assert '123,45' in saved.text

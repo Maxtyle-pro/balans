@@ -7,7 +7,23 @@ from balans.domain import Reply,amount_from_text,date_from_text,CURRENCY,money
 from balans.report_data import summarize,amount
 
 class CurrencyFlow:
+    def _currency_picker(self,c):
+        return Reply('💱 Выберите валюту учёта\nОна будет использоваться для новых расходов, доходов и чеков. Повторно указывать её не нужно.',[[('₽ Рубли','usercurrency:RUB')],[('$ Доллары','usercurrency:USD')],[('€ Евро','usercurrency:EUR')]])
+
+    def _user_currency_callback(self,c,callback):
+        if callback=='currencysettings':return self._currency_picker(c)
+        if not callback.startswith('usercurrency:'):return None
+        code=callback.split(':')[1]
+        c.execute('SELECT choose_user_currency(%s)',(code,))
+        reply=self._welcome(c)
+        reply.text='✅ Валюта учёта: '+code+'.\n\n'+reply.text
+        return reply
+
     def _currency_command(self,c,user,command,arg,sent):
+        if command in ('/account','/workspace') and '|' in arg:
+            setting=c.execute('SELECT currency,currency_selected_at FROM user_settings WHERE user_id=actor_user_id()').fetchone()
+            if setting['currency_selected_at'] and arg.split('|')[-1].strip().upper()!=setting['currency']:
+                return Reply('Используется единая валюта учёта: '+setting['currency']+'. Её можно посмотреть в настройках.',[[('Настройки валюты','currencysettings')]])
         if command=='/account' and '|' in arg:
             parts=[p.strip() for p in arg.split('|')]
             if len(parts)!=2:raise ValueError('/account Доллары | USD')

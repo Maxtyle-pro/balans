@@ -69,10 +69,10 @@ class Privacy:
     def _voice_gate(self,c):return self._privacy_consent_gate(c) or super()._voice_gate(c)
     def _receipt_gate(self,c):return self._privacy_consent_gate(c) or super()._receipt_gate(c)
 
-    def voice_preflight(self,actor,bot,update):
+    def voice_preflight(self,actor,bot,update,seconds=1):
         with self._actor_transaction(actor) as c:
             if blocked:=self._privacy_blocked(c):return blocked
-        return super().voice_preflight(actor,bot,update)
+        return super().voice_preflight(actor,bot,update,seconds)
 
     def receipt_preflight(self,actor,bot,update):
         with self._actor_transaction(actor) as c:
@@ -87,10 +87,10 @@ class Privacy:
             if arg not in ('','on','off'):raise ValueError('/retention on или /retention off — хранение личных оригиналов после обработки.')
             if arg:c.execute('UPDATE user_settings SET keep_personal_originals=%s WHERE user_id=%s',(arg=='on',user))
             row=c.execute('SELECT keep_personal_originals FROM user_settings WHERE user_id=%s',(user,)).fetchone()
-            return Reply('Хранение личных оригиналов после обработки: '+('до 30 дней' if row['keep_personal_originals'] else 'выключено')+'. При выключении существующие личные оригиналы удалятся при ближайшей очистке. Общие подтверждающие документы остаются по правилам бюджета.\n/retention on или off')
+            return Reply('Хранение личных оригиналов после обработки: '+('до 90 дней' if row['keep_personal_originals'] else 'выключено')+'. При выключении существующие личные оригиналы удалятся при ближайшей очистке. Для общих документов действует срок 90 дней. Перед удалением предложим платное продление.\n/retention on или off')
         if command=='/privacy':
             p=c.execute('SELECT * FROM privacy_policy').fetchone()
-            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. AI вызывается после отдельного согласия для текста, голоса и изображений.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 30 дней; /retention off отключает хранение после обработки. Общие оригиналы — весь срок общей операции.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
+            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. AI вызывается после отдельного согласия для текста, голоса и изображений.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 90 дней; /retention off отключает хранение после обработки. Общие оригиналы — 90 дней. Перед удалением предложим платное продление на 90 дней.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
         return None
 
     def _privacy_callback(self,c,user,callback):
@@ -106,7 +106,7 @@ class Privacy:
         for r in requests:
             with self.pool.connection() as c,c.transaction():files=c.execute('SELECT balans.erase_account(%s) AS files',(r['id'],)).fetchone()['files']
             for file in files:
-                storage=self.receipt_storage if file['kind']=='receipt' else self.document_storage.personal
+                storage=self.receipt_storage if file['kind']=='receipt' else self.document_storage.shared if file['kind']=='shared' else self.document_storage.personal
                 storage.remove(UUID(file['id']))
             with self.pool.connection() as c,c.transaction():
                 c.execute("SELECT set_config('balans.erasure_worker','on',true)")
@@ -118,7 +118,7 @@ class Privacy:
             c.execute("SELECT set_config('balans.erasure_worker','on',true)")
             rows=c.execute("SELECT id,kind FROM balans.file_purge_queue WHERE state='pending' LIMIT 1000").fetchall()
         for row in rows:
-            storage=self.receipt_storage if row['kind']=='receipt' else self.document_storage.personal
+            storage=self.receipt_storage if row['kind']=='receipt' else self.document_storage.shared if row['kind']=='shared' else self.document_storage.personal
             storage.remove(row['id'])
             with self.pool.connection() as c,c.transaction():
                 c.execute("SELECT set_config('balans.erasure_worker','on',true)")

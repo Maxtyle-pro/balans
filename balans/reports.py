@@ -26,15 +26,17 @@ def report_uuid(value):
 class Reports:
     def _report_card(self,report):
         s=report['snapshot'];summary=s['summary'];identity=report['id']
-        return Reply(f"Расходы: {s['start']} — {s['end']}\n{s.get('workspace','Личный бюджет')} · Все доступные счета · {s['timezone']}\nИтого: {fmt(summary['total'])} ₽\nОпераций: {summary['count']}\n"
+        reply=Reply(f"Расходы: {s['start']} — {s['end']}\n{s.get('workspace','Личный бюджет')} · {s['timezone']}\nИтого: {fmt(summary['total'])} ₽\nОпераций: {summary['count']}\n"
                      + (('Нет расходов за выбранный период.\n' if summary.get('operation_count') else 'Нет операций за выбранный период.\n') if not summary['count'] else '\n'.join(f"{x['name']}: {fmt(x['total'])} ₽" for x in summary['categories'][:10])+('\nОстальные категории — в PDF и CSV.' if len(summary['categories'])>10 else ''))
                      +f"\nДоходы: {fmt(summary.get('income','0'))} ₽; возвраты: {fmt(summary.get('refunds','0'))} ₽.\nЧистые расходы: {fmt(summary.get('net_expenses',summary['total']))} ₽.\n"
                      +f"\nСравнение с {s['previous_start']} — {s['previous_end']}: {fmt(s['previous']['total'])} ₽.\nИзменение: {fmt(s['delta'])} ₽"
                      +(f" ({s['delta_percent']}%)." if s['delta_percent'] is not None else '. Процент не вычисляется при нулевой базе.')
                      +(f"\nДеньги в пути на конец периода: {fmt(s['funds']['transit'])} ₽. Сводка участников включена в PDF." if s.get('funds') else '')
-                     +'\nЭто снимок данных. /report all — с начала учёта; /report месяц | member=Telegram_ID — участник.',
+                     +'\nВыберите действие ниже.',
                      [[('PDF с графиками',f"rpdf:{identity}"),('CSV',f"rcsv:{identity}")],
-                      [('AI-анализ',f"rask:{identity}"),('Google Sheets',f"rsask:{identity}")],[('Поделиться',f"rshare:{identity}")],[('История изменений CSV',f"raudit:{identity}")]])
+                      [('🤖 ИИ-анализ',f"rask:{identity}")],[('Другой период','ui:go:report_period')],[('Поделиться',f"rshare:{identity}")],[('Главное меню','ui:menu')]])
+        reply.text=reply.text.replace('₽','₽' if s.get('currency','RUB')=='RUB' else s['currency'])
+        return reply
 
     def _get_report(self,c,identity):
         return c.execute('SELECT * FROM reports WHERE id=%s AND expires_at>now()',(report_uuid(str(identity)),)).fetchone()
@@ -93,6 +95,7 @@ class Reports:
         if action=='jretry':
             job=c.execute('SELECT * FROM report_jobs WHERE id=%s FOR UPDATE',(report_uuid(raw),)).fetchone()
             if not job:return Reply('Задание недоступно.')
+            if job['kind']=='sheets':return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])
             if job['state']=='failed':c.execute("UPDATE report_jobs SET state='pending',reply=NULL,error_code=NULL WHERE id=%s",(job['id'],))
             return Reply('Проверяю задание…',report_job_id=str(job['id']))
         if action not in ('rpdf','rcsv','raudit','rask','ranalyze','rsask','rexport'):return None
@@ -122,6 +125,9 @@ class Reports:
         return Reply(f"Отчёт {snapshot['start']} — {snapshot['end']}. Снимок учётных данных.",generated_document=base64.b64encode(data).decode(),generated_filename=f"balans-{snapshot['start']}-{snapshot['end']}.{format}")
 
     def _resolve_sheets_connection(self,actor,identity):
+        return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])
+
+    def _legacy_resolve_sheets_connection(self,actor,identity):
         with self._actor_transaction(actor) as c:
             row=c.execute("SELECT * FROM sheets_connections WHERE id=%s AND (state='active' OR (state='pending' AND expires_at>now()))",(report_uuid(identity),)).fetchone()
             if not row:return Reply('Подключение отменено или код истёк. /sheets connect ССЫЛКА — начать заново.')
@@ -138,6 +144,7 @@ class Reports:
         with self._actor_transaction(actor) as c:
             job=c.execute('SELECT *,lease_until>now() AS live FROM report_jobs WHERE id=%s FOR UPDATE',(report_uuid(identity),)).fetchone()
             if not job:return Reply('Задание недоступно.')
+            if job['kind']=='sheets':return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])
             report=self._get_report(c,job['report_id'])
             if not report:return Reply('Отчёт истёк. /report — создать новый.')
             if job['reply']:return Reply(**job['reply'])

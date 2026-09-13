@@ -57,7 +57,7 @@ class ReceiptStorage:
 
     def read(self,file_id):
         path=self.path(file_id)
-        if not path.is_file() or path.is_symlink() or path.stat().st_mtime<time.time()-30*86400:
+        if not path.is_file() or path.is_symlink():
             raise MediaError('Срок хранения исходного чека истёк. Отправьте его заново.')
         data=path.read_bytes()
         if len(data)>MAX_FILE_BYTES:
@@ -68,10 +68,9 @@ class ReceiptStorage:
         with storage_lock(self.root):self.path(file_id).unlink(missing_ok=True)
 
     def purge(self):
-        with storage_lock(self.root):
-            for path in self.root.glob('*.bin'):
-                if re.fullmatch(r'[0-9a-f-]{36}\.bin',path.name) and not path.is_symlink() and path.stat().st_mtime<time.time()-30*86400:
-                    path.unlink(missing_ok=True)
+        # Database deadlines and delivered notices authorize deletion.
+        # A file's mtime cannot represent purchased retention extensions.
+        return None
 
 
 def prepare(data: bytes,documents_only: bool=False) -> Prepared:

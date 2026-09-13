@@ -27,14 +27,14 @@ for key,label in [
     ('categories','Категории'),('rules','Мои правила'),('category','Изменить категорию'),('ai','Настройки ИИ'),
     ('receipts','Чеки'),('voice','Голосовой ввод'),('batch','Список операций'),('media','Продолжить список'),
     ('subscription','⭐ Моя подписка'),('renewal','Автопродление'),('terms','Условия тарифа'),
-    ('privacy','Приватность'),('retention','Хранение оригиналов'),('delete','Удалить профиль'),
+    ('files','📎 Хранение файлов'),('privacy','Приватность'),('retention','Хранение оригиналов'),('delete','Удалить профиль'),
     ('support','Поддержка'),('paysupport','Поддержка оплаты'),('cancel','Отменить текущий ввод'),
     ('sheets','Google Sheets'),('docquota','Квоты документов'),('docpolicy','Правила документов'),
     ('admin','Панель администратора'),('demo','Тестовый пульт')]:action(key,label)
 
 for key,label,prompt in [
     ('search','Найти операцию','Что найти в описаниях покупок? Например: кофе.'),
-    ('account','Создать счёт','Введите название счёта. Например: Наличные. Для другой валюты: Доллары | USD.'),
+    ('account','Создать счёт','Введите название счёта. Например: Наличные. Валюта берётся из настроек.'),
     ('workspace','Создать общий бюджет','Как назвать общий бюджет? Например: Семья.'),
     ('join','Вступить в бюджет','Пришлите код приглашения, полученный от владельца бюджета.'),
     ('transfer','Перевести между счетами','Введите сумму и счёт получателя через «|». Например: 1000 | Наличные | сегодня | На покупки.'),
@@ -86,18 +86,19 @@ for key,label,command in [
 SECTIONS={
  'records':('📝 Записи',['add','income','manual','history','search','media','batch','cancel']),
  'reports':('📊 Отчёты',['report','report_period','pdf','analyze','csv','sheets','sheets_connect','sheets_off']),
- 'money':('💳 Счета и бюджеты',['accounts','account','opening','transfer','exchange','fx','budget','budget_set','budgetday']),
+ 'money':('💳 Счета и бюджеты',['accounts','account','opening','budget','budget_set','budgetday']),
  'shared':('👥 Общий бюджет',['workspaces','workspace','invite','join','members','funds','issue','returnfunds','claim','receive','reconcile','dispute']),
  'documents':('📎 Документы',['reviewqueue','docs','attach','review','correction','docaudit','docdelete','docquota','docquota_set','docpolicy','docpolicy_set','periodclose','periodopen']),
  'preferences':('⚙️ Настройки',['settings','settings_zone','categories','categories_add','categories_rename','categories_archive','rules','rule','category','ai','receipts','voice','notify']),
  'subscription':('⭐ Подписка',['subscription','renewal','terms','paysupport']),
- 'privacy':('🔒 Приватность и помощь',['privacy','retention','delete','support','diagnostic'])}
+ 'privacy':('🔒 Приватность и помощь',['files','privacy','retention','delete','support','diagnostic'])}
 EXTRAS={'budget':['budget_set','budgetday'],'settings':['settings_zone'],'categories':['categories_add','categories_rename','categories_archive'],
  'notify':['notify_on','notify_off','notify_monthly','notify_monthly_off','notify_weekly','notify_weekly_off','notify_reminder','notify_reminder_off','notify_budget','notify_budget_off','notify_time','notify_quiet'],
  'ai':['ai_on','ai_off'],'voice':['voice_on','voice_off'],'receipts':['receipts_on','receipts_off'],
  'retention':['retention_on','retention_off'],'sheets':['sheets_connect','sheets_off'],'docquota':['docquota_set'],'docpolicy':['docpolicy_set']}
 
 
+action('report_dates','Выбрать даты','/report',prompt='Введите начало и конец периода через пробел. Например: 01.09.2026 13.09.2026.')
 action('docdeleteconfirm','Подтвердить удаление документа',prompt='Введите ID документа и причину через «|». Затем подтвердите удаление кнопкой.')
 SECTIONS['documents'][1].append('docdeleteconfirm')
 
@@ -107,9 +108,14 @@ def buttons(keys):return [[(ACTIONS[key].label,'ui:go:'+key)] for key in dict.fr
 COMMAND_PATTERN=re.compile(r'(?<![\w/])/(?P<name>[a-z][a-z0-9]*)(?!\w)')
 
 def present_reply(reply):
-    """Offer only allowlisted buttons. Never execute or rewrite text from records."""
-    found=[]
+    """Turn legacy command hints into named buttons; preserve literal record cards."""
+    if not reply.command_hints:return reply
+    if 'Квота AI исчерпана' in reply.text:
+        kind=next((k for k in ('text','image','voice','analysis') if f'({k})' in reply.text),'image')
+        return replace(reply,text='🤖 Лимит ИИ исчерпан. Можно добавить пакет или выбрать расширенный тариф. Ручной ввод остаётся доступен.',buttons=[[('Добавить пакет','addon:'+kind)],[('Выбрать тариф','addon:upgrade')],[('Ввести вручную','ui:go:manual')]])
+    found=[]; replacements=[]; consumed=0
     for match in COMMAND_PATTERN.finditer(reply.text):
+        if match.start()<consumed:continue
         key=match['name']
         if key not in ACTIONS:continue
         tail=reply.text[match.start():]
@@ -117,9 +123,15 @@ def present_reply(reply):
                  tail.startswith(a.command) and (len(tail)==len(a.command) or not tail[len(a.command)].isalnum())]
         key=max(presets,key=lambda k:len(ACTIONS[k].command)) if presets else key
         found.append(key)
+        end=match.start()+len(ACTIONS[key].command)
         if match['name']=='history':
             page=re.match(r'/history ([0-9]{1,6})(?!\d)',tail)
-            if page and int(page[1])>0:found[-1]='history:'+page[1]
+            if page and int(page[1])>0:
+                found[-1]='history:'+page[1];end=match.start()+page.end()
+        label='Баланс' if key in ('accounts','account','transfer','exchange','fx') else ('История · страница '+found[-1].split(':')[1] if found[-1].startswith('history:') else ACTIONS[key].label)
+        replacements.append((match.start(),end,'«'+label+'»'));consumed=end
+    from balans.simple_interface import HIDDEN_ACTIONS
+    found=[key for key in found if key not in HIDDEN_ACTIONS]
     existing={data for row in reply.buttons for _,data in row}
     rows=[list(row) for row in reply.buttons]
     for key in dict.fromkeys(found):
@@ -129,7 +141,9 @@ def present_reply(reply):
         label='История · страница '+key.split(':')[1] if key.startswith('history:') else ACTIONS[key].label
         rows.append([(label,data)]);existing.add(data)
     if found and 'ui:menu' not in existing and 'ui:go:help' not in existing:rows.append([('☰ Все действия','ui:menu')])
-    return replace(reply,buttons=rows)
+    text=reply.text
+    for start,end,label in reversed(replacements):text=text[:start]+label+text[end:]
+    return replace(reply,text=text,buttons=rows)
 
 
 class CommandUI(HistoryUI):
@@ -171,6 +185,7 @@ class CommandUI(HistoryUI):
             key=callback[6:]
             if re.fullmatch(r'history:[1-9][0-9]{0,5}',key):return self._dispatch(c,user,'/history '+key.split(':')[1],sent,None)
             if key not in ACTIONS:return Reply('Действие недоступно.',[[('☰ Все действия','ui:menu')]])
+            if key=='transfer':return Reply('Для внесения денег выберите тип:',buttons(['income','opening']))
             if key=='media_cancel':return self._media_blocker(c)
             item=ACTIONS[key]
             if item.prompt:

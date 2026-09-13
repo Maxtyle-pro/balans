@@ -55,14 +55,14 @@ class Billing(BillingDemo, Onboarding):
         if access['status'] in ('trial','active'):
             usage=c.execute('SELECT billing_usage() AS data').fetchone()['data']
             text+='\n\nОсталось на текущий период:'
-            for key,label in [('text','ИИ-категоризации'),('image','Страницы чеков / изображения'),('voice','Голос, минут'),('analysis','ИИ-анализы отчётов')]:
+            for key,label in [('text','ИИ-распознавания текста'),('image','Файлы чеков / изображения'),('voice','Голос, минут'),('analysis','ИИ-анализы отчётов')]:
                 maximum=access['quotas'][key];remaining=max(0,maximum-usage.get(key,0))
                 text+=f"\n{label}: {remaining / 60:.1f} из {maximum / 60:g}" if key=='voice' else f"\n{label}: {remaining} из {maximum}"
             if access.get('period_end'):text+='\nКонец периода квот: '+self._local_deadline(c,access['period_end'])
             text+='\nРучной ввод и обычные отчёты — без отдельной квоты.'
         if access['status']=='trial':text+='\n\nПосле пробного периода оплату подключаете сами. Автоматического списания нет.'
         elif access['status']=='expired':text+='\n\nИстория и экспорт доступны.'
-        text+='\nОбщий бюджет использует подписку и квоты владельца.\n/paysupport — вопросы оплаты.'
+        text+='\n\n/paysupport — вопросы оплаты.'
         buttons=[]
         if access['status']=='not_started':buttons.append([(f"Начать {cfg['trial_days']} дней бесплатно",'trialinfo')])
         if access['status'] not in ('admin_free','suspended'):
@@ -73,6 +73,8 @@ class Billing(BillingDemo, Onboarding):
             rows=[demo] if demo['paid_at'] else []
             buttons.append([('Тестовый пульт','demopanel')])
         if rows:buttons.append([('Управлять продлением','renewal')])
+        if access['status'] in ('trial','active'):
+            buttons.append([('Дополнительные пакеты','addonmenu'),('Расширенный тариф','addon:upgrade')])
         buttons.append([('Ежемесячный отчёт','monthlysettings'),('Назад','start')])
         return Reply(text,buttons)
 

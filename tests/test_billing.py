@@ -97,7 +97,7 @@ def test_quota_reservation_and_release(database,billing):
         send(s,u,'/add 10');send(s,u,'Кофе')
         assert query(database,u,"SELECT count(*) FROM quota_reservations WHERE state='consumed'")==[(1,)]
         send(s,u,'/cancel');send(s,u,'/add 20')
-        assert 'Квота' in send(s,u,'Другой кофе').text
+        assert 'Лимит ИИ исчерпан' in send(s,u,'Другой кофе').text
         assert len(s.ai.calls)==2
         assert 'Квота' not in send(s,u,'/manual').text
     finally:s.close()
@@ -112,7 +112,7 @@ def test_concurrent_shared_quota_is_reserved_once(database,billing):
             with s._actor_transaction(u) as c:c.execute('UPDATE user_settings SET ai_enabled=true WHERE user_id=actor_user_id()')
             send(s,u,'/add 100')
         with ThreadPoolExecutor(2) as pool:results=list(pool.map(lambda u:send(s,u,'Кофе'),(owner,user)))
-        assert sum('Квота' in r.text for r in results)==1
+        assert sum('Лимит ИИ исчерпан' in r.text for r in results)==1
         assert len(s.ai.calls)==1
         assert query(database,owner,"SELECT sum(units) FROM quota_reservations WHERE state IN ('reserved','consumed')")==[(1,)]
     finally:s.close()

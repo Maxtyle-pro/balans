@@ -37,5 +37,5 @@ def parse_items(text,sent,zone):
         description=' '.join(description.split())
         if not description or len(description)>500:raise ValueError('Добавьте описание покупки, до 500 символов.')
         kind='income' if re.search(r'\b(?:зарплата|доход|получил[аи]?|премия)\b',description,re.I) else 'expense'
-        items.append({'amount':str(value),'description':description,'date':date_from_text(day,sent,zone).isoformat(),'kind':kind})
+        items.append({'amount':str(value),'description':description,'date':date_from_text(day,sent,zone).isoformat(),'kind':kind,'capture_warnings':[] if dates else ['date']})
     return items

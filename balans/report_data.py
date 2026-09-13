@@ -80,6 +80,7 @@ def summarize(rows,start,end):
 def export_rows(snapshot):
     rows=[['ID','Дата','Тип','Сумма','Валюта','Категория','Счёт','Описание','Продавец','Источник','Счёт получателя','Исходная покупка','Бюджет','Участник Telegram ID','Проверка','Версия','Документы','Статус получения','Подтверждено получение'],
             *[[r['id'],r['date'],{'expense':'Расход','income':'Доход','transfer':'Перевод','refund':'Возврат','opening':'Начальный остаток'}[r.get('kind','expense')],f"{amount(r['amount']):.2f}",r.get('currency',snapshot.get('currency','RUB')),r['category'],r.get('account','Основной'),r['description'],r['merchant'],r['source'],r.get('destination_account',''),r.get('refund_of',''),snapshot.get('workspace','Личный бюджет'),r.get('participant',''),r.get('review_status',''),r.get('revision',''),r.get('document_count',''),r.get('receipt_status',''),r.get('received_amount','')] for r in snapshot['rows']]]
+    rows=[[cell for index,cell in enumerate(row) if index not in (6,10)] for row in rows]
     if snapshot.get('converted') or any(r.get('currency','RUB')!='RUB' for r in snapshot['rows']):
         rows[0]+= ['Исходная сумма','Исходная валюта','Курс','Дата курса','Источник курса']
         for cells,row in zip(rows[1:],snapshot['rows']):cells += [row.get('original_amount',row['amount']),row.get('original_currency',row.get('currency','RUB')),row.get('exchange_rate') or '',row.get('exchange_rate_on') or '',row.get('rate_source') or '']

@@ -1,5 +1,10 @@
+from balans.simple_interface import SimpleInterface,MAIN_BUTTONS
+from balans.text_recognition import TextRecognition
+from balans.text_ai import TextAI
 """Durable conversation: each update and its response commit atomically."""
 from balans.command_ui import CommandUI
+from balans.addons import Addons
+from balans.automatic_capture import AutomaticCapture
 from dataclasses import asdict
 from datetime import datetime
 from uuid import UUID
@@ -55,22 +60,23 @@ HELP = ('/subscription — подписка и оплата\n/diagnostic — п�
         '/rules — личные правила\n/rule — правило по словам\n/manual — ручной ввод\n'
         '/receipts — фото и PDF-чек\n/voice — голосовой ввод\n'
         '/support — поддержка\n/help — помощь\n\n'
-        'Можно отправить сумму без команды. Сохранение — только после подтверждения. '
+        'Можно отправить сообщение без команды. Распознанные операции записываются автоматически; исправления — кнопкой «Изменить». '
         'Доступны личные и совместные бюджеты, RUB, USD и EUR. /privacy — приватность; /delete — удаление профиля; /exchange — обмен; /fx — ручной курс.')
 QUICK_HELP = ('💡 Как пользоваться Балансом\n\n'
               '✍️ Напишите «Кофе 250» или «Зарплата 50000».\n'
               '🎙 Отправьте голосовое сообщение или фото чека.\n'
-              '✅ Проверьте запись и подтвердите сохранение.\n\n'
-              '📊 История, отчёты, счета и настройки — в меню «Все действия».')
-MENU = [[('Добавить расход', 'add'), ('История', 'history')], [('Итог месяца', 'report'), ('Счёт', 'accounts')], [('☰ Все действия','ui:menu')]]
+              '✅ Операция запишется автоматически. При необходимости нажмите «Изменить».\n\n'
+              '📊 История, отчёты, баланс и настройки — в меню «Все действия».')
+MENU = MAIN_BUTTONS
 
 
-class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Billing, Planning, Notifications, SharedReports, Sharing, MediaFlow, Documents, Funds, Workspaces, InputFlow, Finance, Reports, Voice, Receipts, Categorization):
+class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds, Inbox, Billing, Planning, Notifications, SharedReports, Sharing, MediaFlow, Documents, Funds, Workspaces, InputFlow, Finance, Reports, Voice, Receipts, Categorization):
     def __init__(self, dsn: str, support: str = '', ai: CategoryAI | None = None, receipt_ai=None, receipt_storage=None, voice_ai=None, report_ai=None, sheets=None, admin_config=None):
         self.pool = ConnectionPool(dsn, min_size=1, max_size=5, open=True, kwargs={'row_factory': dict_row})
         self.admin_config=admin_config or AdminConfig.from_env()
         self.support = support
         self.ai = ai or CategoryAI()
+        self.text_ai = TextAI(getattr(self.ai,'client',None),self.ai.model)
         self.receipt_ai = receipt_ai or ReceiptAI(getattr(self.ai,'client',None),self.ai.model)
         self.report_ai = report_ai or ReportAI(getattr(self.ai,'client',None),self.ai.model)
         self.sheets = sheets or Sheets()
@@ -95,7 +101,7 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
             c.execute('SELECT 1 FROM balans.currencies LIMIT 1')
             config=c.execute('SELECT * FROM balans.ai_configuration').fetchone()
             if config['model']:
-                for adapter in (self.ai,self.receipt_ai,self.report_ai,self.voice_ai):adapter.model=config['model']
+                for adapter in (self.ai,self.text_ai,self.receipt_ai,self.report_ai,self.voice_ai):adapter.model=config['model']
             if config['transcribe_model']:self.voice_ai.transcribe_model=config['transcribe_model']
             if config['confidence'] is not None:self.ai.threshold=float(config['confidence'])
 
@@ -119,11 +125,15 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
                 try:
                     with c.transaction():reply = self._dispatch(c, user_id, text.strip(), sent_at, callback)
                 except RaiseException as exc:
-                    reply = Reply(exc.diag.message_primary)
+                    message=exc.diag.message_primary
+                    kind=next((k for k in ('text','image','voice','analysis') if f'({k})' in message),None)
+                    reply=self._quota_card(c,kind) if kind and 'Квота AI исчерпана' in message else Reply(message)
                 except ValueError as exc:
                     reply = Reply(str(exc))
                 c.execute('INSERT INTO telegram_updates(bot_id,update_id,user_id,response,workspace_id) VALUES(%s,%s,%s,%s,coalesce(%s,current_workspace()))',
                           (bot_id, update_id, user_id, Jsonb(asdict(reply)),UUID(reply.access_workspace_id) if reply.access_workspace_id else None))
+        if reply.text_job_id:return self._resolve_text_job(telegram_id,reply.text_job_id)
+        if reply.capture_batch_id:return self._resolve_capture_batch(telegram_id,reply.capture_batch_id)
         if reply.share_id:return self._resolve_share(telegram_id,reply.share_id)
         if reply.attachment_id:return self._resolve_document(telegram_id,reply.attachment_id)
         if reply.deleted_attachment_id:return self._remove_document_file(telegram_id,reply.deleted_attachment_id)
@@ -143,6 +153,8 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
         return c.execute("SELECT * FROM operation_drafts WHERE state='pending' AND author_user_id=actor_user_id()").fetchone()
 
     def _prompt(self, c, d):
+        captured=self._capture_draft(c,d)
+        if captured is not None:return captured
         CURRENCY.set(self._account_currency(c,d['account_id']))
         if d['kind']!='expense' or d['edit_operation_id'] or d['finance_edit_field']:
             return self._finance_prompt(c,d)
@@ -191,12 +203,27 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
         row = self._account_context(c)
         c.execute('INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,timezone_snapshot,source_sent_at,amount,step,flow) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)',
                   (row['id'], user_id, row['account_id'], row['timezone'], sent_at, amount, ('category' if flow=='manual' else 'description') if amount is not None else 'amount', flow))
+        c.execute('UPDATE operation_drafts SET automatic_capture=%s WHERE id=%s',(flow=='auto' and self._capture_enabled(c),self._draft(c)['id']))
         return self._prompt(c, self._draft(c))
 
     def _dispatch(self, c, user_id, text, sent_at, callback):
+        simple=self._simple_entry(c,user_id,text,sent_at,callback)
+        if simple is not None:return simple
         ui=self._ui_entry(c,user_id,text,sent_at,callback)
         if ui is not None:return ui
         if callback:
+            if callback.startswith('incoming:'):
+                _,kind,identity,version=callback.split(':')
+                if kind not in ('income','opening'):return Reply('Тип недоступен.')
+                d=c.execute("UPDATE operation_drafts SET kind=%s,capture_kind_pending=false,version=version+1 WHERE id=%s AND version=%s AND state='pending' AND capture_kind_pending RETURNING *",(kind,UUID(identity),int(version))).fetchone()
+                return self._prompt(c,d) if d else Reply('Запись уже обработана или недоступна.')
+            if callback in ('captureon','captureoff'):
+                c.execute('UPDATE user_settings SET automatic_capture=%s WHERE user_id=%s',(callback=='captureon',user_id))
+                return Reply('Автосохранение '+('включено.' if callback=='captureon' else 'выключено. Записи сохраняются после подтверждения.'),[[('Настройки','ui:go:settings')]])
+            currency_choice=self._user_currency_callback(c,callback)
+            if currency_choice is not None:return currency_choice
+            addon=self._addon_callback(c,user_id,callback)
+            if addon is not None:return addon
             privacy=self._privacy_callback(c,user_id,callback)
             if privacy is not None:return privacy
             admin=self._admin_callback(c,user_id,callback)
@@ -277,6 +304,8 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
         parts = text.split(maxsplit=1)
         command = parts[0].split('@')[0].lower() if parts else ''
         arg = parts[1] if len(parts) > 1 else ''
+        if command=='/cancel' or (command=='/ai' and arg=='off'):
+            c.execute("UPDATE text_jobs SET state='cancelled',reply=%s WHERE state IN ('queued','running')",(Jsonb(asdict(Reply('Распознавание текста отменено.'))),))
         currency=self._currency_command(c,user_id,command,arg,sent_at)
         if currency is not None:return currency
         privacy=self._privacy_command(c,user_id,command,arg,sent_at)
@@ -316,6 +345,7 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
             return category_reply
         if command == '/start':
             return self._welcome(c)
+        if command == '/files':return self._storage_overview(c)
         if command == '/help':
             intro=c.execute("SELECT value FROM service_content WHERE key='help_intro'").fetchone()
             reply=self._ui_menu(c)
@@ -338,8 +368,7 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
                     raise ValueError('Неизвестный часовой пояс. Пример: /settings Europe/Moscow') from None
                 c.execute('UPDATE user_settings SET timezone=%s WHERE user_id=%s', (arg, user_id))
             zone = c.execute('SELECT timezone FROM user_settings WHERE user_id=%s', (user_id,)).fetchone()['timezone']
-            return Reply(f'Валюта выбранного счёта: {self._account_context(c)['currency']}\nЧасовой пояс: {zone}\nСчёт: {self._account_name(c,self._account_context(c)['account_id'])}\nСохранение: с подтверждением.\n'
-                         'Изменить зону: /settings Europe/Moscow\nНовая зона применяется к новым черновикам.')
+            return self._simple_settings(c)
         if command == '/history':
             if arg and (not arg.isascii() or not arg.isdigit() or len(arg)>6 or int(arg)<1):
                 raise ValueError('Номер страницы должен быть положительным целым: /history 2')
@@ -351,11 +380,16 @@ class Service(CommandUI, CurrencyFlow, Privacy, AdminAuth, AdminService, Refunds
         if media:return self._media_text(c,media,text)
         d = self._draft(c)
         if not d:
+            if self._capture_enabled(c):return self._free_text(c,user_id,text,sent_at)
             try:
                 amount = amount_from_text(text)
             except ValueError:
                 return self._free_text(c,user_id,text,sent_at)
             return self._new(c, user_id, sent_at, amount)
+        if d['capture_kind_pending']:return self._prompt(c,d)
+        if d['voice_job_id'] and not d['edit_operation_id']:
+            voice_reply=self._voice_text(c,d,text)
+            if voice_reply is not None:return voice_reply
         if d['kind']!='expense' or d['edit_operation_id'] or d['finance_edit_field']:
             return self._finance_text(c,d,text)
         if d['voice_job_id']:

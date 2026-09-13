@@ -14,7 +14,7 @@ DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
 
 class VoiceResult(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    kind: Literal['expense', 'other', 'multiple']
+    kind: Literal['expense', 'income', 'opening', 'incoming', 'other', 'multiple']
     amount: str | None
     amount_confidence: float = Field(ge=0, le=1)
     currency: str | None

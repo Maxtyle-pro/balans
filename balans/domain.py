@@ -32,6 +32,11 @@ class Reply:
     document_ids: list[str] = field(default_factory=list)
     photo_ids: list[str] = field(default_factory=list)
     parse_mode: str | None = None
+    command_hints: bool = True
+    text_job_id: str | None = None
+    capture_batch_id: str | None = None
+    capture_draft_id: str | None = None
+    additional_replies: list[dict] = field(default_factory=list)
 
 
 def amount_from_text(value: str) -> Decimal:
