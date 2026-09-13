@@ -75,6 +75,7 @@ def test_developer_button_starts_bot_input(service):
 def test_single_start_and_redelivery_send_one_reply(service):
     from aiogram.types import Update
     bot=FakeBot()
+    bot.id=598001
     event=update(598001,'/start')
     service.accept_updates(bot.id,[event,event])
     job=service.next_update(bot.id)

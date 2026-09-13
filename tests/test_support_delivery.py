@@ -1,7 +1,15 @@
 import asyncio
+import pytest
 from test_service import send,query
 from test_telegram import FakeBot
 from balans.support_delivery import deliver_one,DEVELOPER_ID
+
+
+@pytest.fixture(autouse=True)
+def isolate_delivery_queue(service):
+    with service.pool.connection() as c,c.transaction():
+        c.execute("SELECT set_config('balans.support_worker','on',true)")
+        c.execute('UPDATE balans.support_tickets SET delivered_at=now() WHERE delivered_at IS NULL')
 
 
 def test_contact_delivery_and_cancel(service,database):
