@@ -37,7 +37,7 @@ def test_start_terms_and_activation_once(database,billing):
         assert query(database,u,'SELECT enabled,monthly FROM notification_preferences')==[(True,True)]
         send(s,u,callback=accept)
         assert query(database,u,'SELECT trial_until FROM billing_accounts')==[(until,)]
-        assert '➕ Добавить расход' in [x for row in send(s,u,'/start').buttons for x,_ in row]
+        assert '➖ Записать расход' in [x for row in send(s,u,'/start').buttons for x,_ in row]
         r=send(s,u,'Кофе 250');assert len(s.ai.calls)==1
         r=send(s,u,callback=button(r,'Подтвердить категорию'))
         r=send(s,u,callback=button(r,'Сохранить'))
@@ -75,7 +75,10 @@ def test_disabled_billing_and_short_help(service,database):
     u=next(USERS);r=send(service,u,'/start')
     r=send(service,u,callback=button(r,'₽ Рубли'))
     assert 'бесплатно' not in ' '.join(x for row in r.buttons for x,_ in row)
-    r=send(service,u,callback=button(r,'💡 Как пользоваться'))
+    assert '👋 <b>С чего начнём?</b>' in r.text
+    assert r.buttons == [[('➖ Записать расход','add')], [('➕ Записать доход','ui:go:income')], [('☰ Меню','ui:menu')]]
+    r=send(service,u,callback=button(r,'☰ Меню'))
+    r=send(service,u,callback=button(r,'💡 Помощь'))
     assert len(r.text)<700 and not r.messages
     assert 'Моя подписка' in [x for row in r.buttons for x,_ in row]
     assert 'пока не включена' in send(service,u,callback='trialinfo').text
