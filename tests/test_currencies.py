@@ -28,14 +28,14 @@ def test_native_accounts_reports_and_export(service,database):
     assert '10,00 USD' in send(s,u,'/report').text
     all_report=send(s,u,'/report all | currency=all')
     assert 'Валюты раздельно' in all_report.text and '110,00' not in all_report.text
-    pdf=send(s,u,callback=button(all_report,'PDF'))
+    pdf=send(s,u,callback=button(all_report,'📄 Скачать PDF-отчёт'))
     text=''.join(p.extract_text() for p in PdfReader(BytesIO(base64.b64decode(pdf.generated_document))).pages)
     assert 'USD' in text and 'RUB' in text and '{currency}' not in text
     exported=send(s,u,'/csv all | currency=all')
     rows=list(csv.reader(base64.b64decode(exported.generated_document).decode('utf-8-sig').splitlines()))
     assert {r[4] for r in rows[1:]}=={'RUB','USD'}
     assert len(rows[0])==len(rows[1])==22
-    sharing=send(s,u,callback=button(all_report,'Поделиться'))
+    sharing=send(s,u,callback=button(all_report,'📄 Скачать PDF-отчёт').replace('rpdf:','rshare:'))
     assert len(sharing.messages)==2 and 'USD' in ''.join(sharing.messages)
     assert 'одну валюту' in send(s,u,'/analyze all | currency=all').text
 

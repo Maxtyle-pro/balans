@@ -26,17 +26,30 @@ def report_uuid(value):
 class Reports:
     def _report_card(self,report):
         s=report['snapshot'];summary=s['summary'];identity=report['id']
-        reply=Reply(f"Расходы: {s['start']} — {s['end']}\n{s.get('workspace','Личный бюджет')} · {s['timezone']}\nИтого: {fmt(summary['total'])} ₽\nОпераций: {summary['count']}\n"
-                     + (('Нет расходов за выбранный период.\n' if summary.get('operation_count') else 'Нет операций за выбранный период.\n') if not summary['count'] else '\n'.join(f"{x['name']}: {fmt(x['total'])} ₽" for x in summary['categories'][:10])+('\nОстальные категории — в PDF и CSV.' if len(summary['categories'])>10 else ''))
-                     +f"\nДоходы: {fmt(summary.get('income','0'))} ₽; возвраты: {fmt(summary.get('refunds','0'))} ₽.\nЧистые расходы: {fmt(summary.get('net_expenses',summary['total']))} ₽.\n"
-                     +f"\nСравнение с {s['previous_start']} — {s['previous_end']}: {fmt(s['previous']['total'])} ₽.\nИзменение: {fmt(s['delta'])} ₽"
-                     +(f" ({s['delta_percent']}%)." if s['delta_percent'] is not None else '. Процент не вычисляется при нулевой базе.')
-                     +(f"\nДеньги в пути на конец периода: {fmt(s['funds']['transit'])} ₽. Сводка участников включена в PDF." if s.get('funds') else '')
-                     +'\nВыберите действие ниже.',
-                     [[('PDF с графиками',f"rpdf:{identity}"),('CSV',f"rcsv:{identity}")],
-                      [('🤖 ИИ-анализ',f"rask:{identity}")],[('Другой период','ui:go:report_period')],[('Поделиться',f"rshare:{identity}")],[('Главное меню','ui:menu')]])
-        reply.text=reply.text.replace('₽','₽' if s.get('currency','RUB')=='RUB' else s['currency'])
-        return reply
+        from balans.category_settings import label
+        from datetime import date
+        currency=s.get('currency','RUB');symbol='₽' if currency=='RUB' else currency
+        def money(value):return fmt(value)+' '+symbol
+        start=date.fromisoformat(s['start']);end=date.fromisoformat(s['end'])
+        lines=[f"📊 {start:%d.%m.%Y} — {end:%d.%m.%Y}",
+               '',f"➕ Доходы — {money(summary.get('income','0'))}",f"➖ Расходы — {money(summary['total'])}"]
+        refunds=amount(summary.get('refunds','0'))
+        if refunds:lines.append('↩️ Возвраты — '+money(refunds))
+        flow=amount(summary.get('income','0'))-amount(summary['total'])+refunds
+        lines.append(('💚 Разница за период: +' if flow>=0 else '🔻 Разница за период: −')+money(abs(flow)))
+        if summary['categories']:
+            lines+=['','На что потратили']+[label(x['name'])+' — '+money(x['total']) for x in summary['categories'][:5]]
+            if len(summary['categories'])>5:lines.append('Остальные категории — в PDF-отчёте.')
+        elif not summary.get('operation_count'):lines+=['','За этот период записей пока нет.']
+        if s.get('delta_percent') is not None and amount(s['previous']['total'])>0:
+            percent=amount(s['delta_percent'])
+            prev_start=date.fromisoformat(s['previous_start']);prev_end=date.fromisoformat(s['previous_end'])
+            lines+=['',f"Расходы на {abs(percent)}% {'больше' if percent>=0 else 'меньше'}, чем за {prev_start:%d.%m.%Y} — {prev_end:%d.%m.%Y}."]
+        return Reply('\n'.join(lines),[
+            [('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],
+            [('🤖 Анализ расходов',f'rask:{identity}')],
+            [('📅 Изменить период','ui:go:report_period')],
+            [('☰ Меню','ui:menu')]],command_hints=False)
 
     def _get_report(self,c,identity):
         return c.execute('SELECT * FROM reports WHERE id=%s AND expires_at>now()',(report_uuid(str(identity)),)).fetchone()

@@ -73,34 +73,42 @@ def render_pdf(snapshot):
     title=ParagraphStyle('title',parent=heading,fontSize=28,leading=34,spaceBefore=0)
     def p(text,style=normal):return Paragraph(escape(str(text)).replace('\n','<br/>'),style)
     summary=snapshot['summary'];previous=snapshot['previous'];story=[]
-    story += [p('Баланс / Финансовый отчёт',title),p(f"{snapshot['start']} - {snapshot['end']} | {currency} | {snapshot['timezone']}"),
-              p(snapshot.get('workspace','Личный бюджет') ,small),Spacer(1,12),p(fmt(summary['total'])+' '+currency,title),
-              p(f"Операций: {summary['count']}   |   В среднем за день: {fmt(summary['daily_average'])} {currency}")]
-    if snapshot.get('filter_member'):story += [p('Выборка по участнику: '+str(snapshot['filter_member']),small)]
-    story += [p(f"Доходы: {fmt(summary.get('income','0'))} {currency} | Возвраты: {fmt(summary.get('refunds','0'))} {currency} | Чистые расходы: {fmt(summary.get('net_expenses',summary['total']))} {currency}",small)]
-    if not summary['count']:
-        story += [p('Нет расходов за выбранный период.' if summary.get('operation_count') else 'Нет операций за выбранный период.',heading)]
-    else:
-        story += [p('Структура расходов',heading),category_chart(summary['categories']),p(('Динамика по месяцам' if len(summary['days'])<=62 else 'Динамика по 7-месячным интервалам') if summary.get('granularity')=='month' else ('Динамика по дням' if len(summary['days'])<=62 else 'Динамика по 7-дневным интервалам'),heading),daily_chart(summary['days'],summary.get('granularity')=='month')]
-    story += [PageBreak(),p('Сравнение и крупнейшие расходы',title),
-              p(f"Период сравнения: {snapshot['previous_start']} - {snapshot['previous_end']}."),
-              p(f"Расходы периода сравнения: {fmt(previous['total'])} {currency}. Изменение: {fmt(snapshot['delta'])} {currency}."),
-              p('Процент изменения: '+(snapshot['delta_percent']+'%' if snapshot['delta_percent'] is not None else 'не вычисляется: в периоде сравнения нет расходов.')),
-              p('Графики показывают расходы до возвратов. Начальный остаток не считается доходом. Наличие записей не означает полноту учёта.',small)]
-    top=sorted([r for r in snapshot['rows'] if r.get('kind','expense')=='expense'],key=lambda r:amount(r['amount']),reverse=True)[:20]
-    if top:
-        story += [p('До 20 крупнейших операций',heading)]
-        data=[[p('Дата',small),p('Покупка / категория',small),p('Сумма '+currency,small)]]
-        data += [[p(r['date'],small),p(r['description'][:180]+'\n'+r['category'],small),p(fmt(r['amount']),small)] for r in top]
+    from datetime import date
+    def day(value):return date.fromisoformat(value).strftime('%d.%m.%Y')
+    symbol={'RUB':'₽','USD':'$','EUR':'€'}.get(currency,currency)
+    def cash(value):return fmt(value)+' '+symbol
+    story += [p('Баланс',title),p('Финансовый отчёт',heading),p(day(snapshot['start'])+' — '+day(snapshot['end'])+' · '+currency),Spacer(1,10)]
+    story += [p('Доходы: '+cash(summary.get('income','0')),heading),p('Расходы: '+cash(summary['total']),heading)]
+    if amount(summary.get('refunds','0')):story.append(p('Возвраты: '+cash(summary['refunds'])))
+    flow=amount(summary.get('income','0'))-amount(summary['total'])+amount(summary.get('refunds','0'))
+    story.append(p('Разница за период: '+cash(flow)))
+    opening=sum((amount(r['amount']) for r in snapshot['rows'] if r.get('kind')=='opening'),amount(0))
+    if opening:story.append(p('Начальный остаток: '+cash(opening)+' (не входит в доходы)',small))
+    if summary['categories']:
+        story += [p('На что потратили',heading),category_chart(summary['categories'])]
+        story += [p(c['name']+' — '+cash(c['total'])+' · '+str(c['share'])+'%',small) for c in summary['categories']]
+    else:story.append(p('За этот период расходов нет.'))
+    story += [PageBreak(),p('Все операции за период',heading)]
+    rows=sorted(snapshot['rows'],key=lambda r:(r['date'],r.get('id','')))
+    if rows:
+        data=[[p('Дата',small),p('Операция / категория',small),p('Сумма',small)]]
+        kinds={'expense':'Расход','income':'Доход','opening':'Начальный остаток','refund':'Возврат','transfer':'Перевод'}
+        for r in rows:
+            kind=r.get('kind','expense')
+            prefix='−' if kind=='expense' else '+' if kind in ('income','refund') else ''
+            detail=kinds.get(kind,kind)+'\n'+r['description']
+            if kind=='expense':detail+='\n'+r['category']
+            data.append([p(day(r['date']),small),p(detail,small),p(prefix+cash(r['amount']),small)])
         table=Table(data,colWidths=[77,308,110],repeatRows=1,hAlign='LEFT')
         table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#E6F3F4')),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),9),('LINEBELOW',(0,0),(-1,-1),.4,colors.HexColor('#DCE5ED'))]))
-        story += [table]
+        story.append(table)
+    else:story.append(p('За этот период записей нет.'))
     if snapshot.get('funds'):
         funds=snapshot['funds']
         story += [PageBreak(),p('Совместный бюджет',title),p(snapshot.get('workspace','')),p('Деньги в пути на конец периода: '+fmt(funds['transit'])+' '+currency,heading)]
         for member in funds['members']:
             story += [p('Участник '+member['participant'],heading),p(f"На начало: {fmt(member['opening'])} {currency} | На конец: {fmt(member['closing'])} {currency} | Заявленный остаток: {fmt(member['declared'])} {currency}"),p(f"Получено: {fmt(member['received'])} {currency}; возвращено руководителю: {fmt(member['returned'])} {currency}; в пути к участнику: {fmt(member['transit'])} {currency}; несверенные приходы: {fmt(member['pending'])} {currency}. Расходы периода без принятия: {fmt(member['unreviewed'])} {currency}.",small)]
-    story += [Spacer(1,14),p('Отчёт является снимком учётных данных на '+snapshot['created_at']+'. Полный список доступен в CSV. AI-анализ вызывается отдельно в боте.',small)]
+    story += [Spacer(1,14),p('Отчёт является снимком учётных данных на '+snapshot['created_at']+'.',small)]
     def footer(canvas,doc):
         canvas.setFont('Balans',8);canvas.setFillColor(MUTED)
         canvas.drawString(50,28,'Баланс | Финансовый отчёт');canvas.drawRightString(A4[0]-50,28,str(doc.page))

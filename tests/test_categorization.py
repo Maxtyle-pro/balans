@@ -138,7 +138,7 @@ def test_saved_category_revision_no_new_money(ai_service,database):
     assert 'устарел' in send(service,user,callback=choice).text
     assert query(database,user,'SELECT revision_no FROM operation_revisions ORDER BY revision_no')==[(1,),(2,)]
     assert query(database,user,'SELECT count(*),sum(delta) FROM postings')==[(1,Decimal('-250'))]
-    assert 'Продукты: 250,00' in send(service,user,'/report').text
+    assert 'Продукты — 250,00' in send(service,user,'/report').text
     assert 'Запомнил' in send(service,user,callback=button(corrected,'Запомнить для меня')).text
     assert query(database,user,"SELECT count(*) FROM audit_log WHERE action='category_changed'")==[(1,)]
     # History can open category correction on any saved operation, including older ones.

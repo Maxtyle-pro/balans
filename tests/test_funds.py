@@ -52,7 +52,7 @@ def test_claim_external_rejection_and_match(service,database):
     cl=str(query(database,owner,'SELECT id FROM fund_claims')[0][0])
     r=send(s,owner,f'/reconcile {cl} | external | Выписка проверена');confirm(s,owner,r)
     assert '1 000,00 ₽ · сверенный' in send(s,user,'/accounts').text
-    assert 'Доходы: 1 000,00' in send(s,user,'/report').text
+    assert 'Доходы — 1 000,00' in send(s,user,'/report').text
     confirm(s,user,send(s,user,'/claim 500 | сегодня | Руководитель | Новая выдача'))
     cl=str(query(database,owner,"SELECT id FROM fund_claims WHERE state='pending'")[0][0])
     issue(s,owner,user,'500');tr=identity(database,owner)

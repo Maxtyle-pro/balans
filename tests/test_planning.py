@@ -93,7 +93,7 @@ def test_weekly_and_reminder_dedupe(service,database):
     rows=query(database,u,'SELECT kind,entity_kind FROM notification_outbox ORDER BY kind')
     assert rows==[('reminder','budget'),('weekly','report')]
     identity=query(database,u,"SELECT id FROM notification_outbox WHERE kind='weekly'")[0][0]
-    assert 'Расходы:' in send(s,u,callback=f'nopen:{identity}').text
+    assert 'Расходы —' in send(s,u,callback=f'nopen:{identity}').text
 
 
 def test_daily_digest_and_quiet_delivery(service,database):

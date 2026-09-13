@@ -80,14 +80,14 @@ def test_snapshot_current_revisions_and_isolation(reporting,database):
     expense(s,user);expense(s,user,'200.35')
     card=send(s,user,'/report')
     assert '300,60' in card.text
-    assert 'не вычисляется' in card.text
+    assert 'не вычисляется' not in card.text
     assert query(database,other,'SELECT * FROM reports')==[]
-    assert 'недоступен' in send(s,other,callback=button(card,'PDF с графиками')).text
-    pdf=send(s,user,callback=button(card,'PDF с графиками'))
+    assert 'недоступен' in send(s,other,callback=button(card,'📄 Скачать PDF-отчёт')).text
+    pdf=send(s,user,callback=button(card,'📄 Скачать PDF-отчёт'))
     text=''.join(p.extract_text() for p in PdfReader(BytesIO(base64.b64decode(pdf.generated_document))).pages)
-    assert '300,60' in text and 'Структура расходов' in text
+    assert '300,60' in text and 'На что потратили' in text
     expense(s,user,'999')
-    again=send(s,user,callback=button(card,'PDF с графиками'))
+    again=send(s,user,callback=button(card,'📄 Скачать PDF-отчёт'))
     assert '1 299,60' not in ''.join(p.extract_text() for p in PdfReader(BytesIO(base64.b64decode(again.generated_document))).pages)
     assert not ai.calls
 
@@ -95,8 +95,8 @@ def test_snapshot_current_revisions_and_isolation(reporting,database):
 def test_empty_report_no_ai(reporting):
     s,ai,_=reporting;user=next(USERS)
     card=send(s,user,'/report')
-    assert 'Нет операций' in card.text
-    assert 'не вызывается' in send(s,user,callback=button(card,'🤖 ИИ-анализ')).text
+    assert 'За этот период записей' in card.text
+    assert 'не вызывается' in send(s,user,callback=button(card,'🤖 Анализ расходов')).text
     assert not ai.calls
 
 
@@ -154,7 +154,7 @@ def test_expired_snapshots_and_bad_callback(reporting,database):
     with psycopg.connect(database[0]) as c:
         c.execute("SELECT set_config('balans.telegram_user_id',%s,true)",(str(user),))
         c.execute("UPDATE balans.reports SET expires_at=now()-interval '1 day'")
-    assert 'истёк' in send(s,user,callback=button(card,'PDF с графиками')).text
+    assert 'истёк' in send(s,user,callback=button(card,'📄 Скачать PDF-отчёт')).text
     assert 'bad' not in send(s,user,callback='rpdf:bad').text
 
 
@@ -179,4 +179,25 @@ def test_generated_document_transport(reporting):
     asyncio.run(process_update(bot,s,update))
     assert bot.documents[0].filename.endswith('.pdf')
     assert bot.documents[0].data.startswith(b'%PDF')
-    assert 'Нет операций' in ''.join(page.extract_text() for page in PdfReader(BytesIO(bot.documents[0].data)).pages)
+    assert 'За этот период записей' in ''.join(page.extract_text() for page in PdfReader(BytesIO(bot.documents[0].data)).pages)
+
+
+def test_pdf_contains_every_operation_and_income():
+    from scripts.check_report_pdf import fixture
+    from balans.report_pdf import render_pdf
+    from balans.report_data import summarize
+    from datetime import date
+    s=fixture()
+    for i,row in enumerate(s['rows']):row['description']=f'Покупка номер {i:03d}'
+    s['rows'] += [dict(s['rows'][0],id='income',kind='income',amount='100000',description='Зарплата за месяц'),dict(s['rows'][0],id='opening',kind='opening',amount='5000',description='Деньги до начала учёта')]
+    s['summary']=summarize(s['rows'],date(2026,9,1),date(2026,9,10))
+    text=''.join(p.extract_text() for p in PdfReader(BytesIO(render_pdf(s))).pages)
+    for row in s['rows']:assert row['description'] in text
+    assert '100 000,00' in text and 'Начальный остаток' in text
+
+
+def test_simple_report_has_four_actions(reporting):
+    s,_,_=reporting;u=next(USERS)
+    card=send(s,u,'/report')
+    assert [label for row in card.buttons for label,_ in row]==['📄 Скачать PDF-отчёт','🤖 Анализ расходов','📅 Изменить период','☰ Меню']
+    assert 'Europe/Moscow' not in card.text and 'Валюта:' not in card.text

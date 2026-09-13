@@ -89,7 +89,7 @@ def test_opening_excluded_from_income_report(service,database):
     s=service;u=next(USERS);enable(s,u);s.text_ai=TextFake('opening')
     send(s,u,'На начало учёта было пять тысяч')
     report=send(s,u,'/report')
-    assert 'Доходы: 0,00' in report.text,report.text
+    assert 'Доходы — 0,00' in report.text,report.text
 
 def test_text_adapter_structured_request():
     import json,httpx

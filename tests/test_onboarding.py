@@ -132,7 +132,7 @@ def test_monthly_report_dedup_and_always_enabled(service,database):
     assert len(rows)==1 and 'Итоги месяца' in rows[0][1]
     notice=next(j for j in s.claim_notifications(now+timedelta(minutes=3)) if j['id']==rows[0][0])
     assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3))
-    assert 'Расходы:' in send(s,u,callback=f"nopen:{notice['id']}").text
+    assert 'Расходы —' in send(s,u,callback=f"nopen:{notice['id']}").text
     send(s,u,callback='monthlyoff')
     assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3)) is not None
     assert query(database,u,"SELECT count(*) FROM report_jobs WHERE kind='analysis'")==[(0,)]

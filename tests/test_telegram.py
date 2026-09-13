@@ -47,7 +47,7 @@ def test_private_messages_and_retry(service):
         asyncio.run(process_update(bot,service,saving))
     asyncio.run(process_update(bot,service,saving))
     asyncio.run(process_update(bot,service,update(50005,'/report')))
-    assert 'Итого: 123,45' in bot.messages[-1][1]
+    assert 'Расходы — 123,45' in bot.messages[-1][1]
     assert bot.messages[-1][2].get('parse_mode') is None
 
 

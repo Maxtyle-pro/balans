@@ -2,11 +2,16 @@ from itertools import count
 from uuid import UUID
 import base64
 from test_service import send,query,draft
-from test_receipts import button
+from test_receipts import button as standard_button
 from test_workspaces import admit
 from test_funds import issue,confirm,identity
 from balans.share_data import share_parts,DEFAULT_OPTIONS
 from scripts.check_report_pdf import fixture
+
+# Legacy sharing remains testable through old callbacks, without a public button.
+def button(reply,label):
+    if label=='Поделиться':return standard_button(reply,'📄 Скачать PDF-отчёт').replace('rpdf:','rshare:')
+    return standard_button(reply,label)
 
 USERS=count(130000000);UPDATES=count(2200000)
 
@@ -75,7 +80,7 @@ def test_shared_report_member_scope_and_revision_snapshot(service,database):
     operation=str(query(database,u,"SELECT id FROM operations WHERE kind='expense'")[0][0])
     edit=send(s,u,callback='fedit:'+operation)
     send(s,u,callback=button(edit,'Сумма'));edit=send(s,u,'6000');send(s,u,callback=button(edit,'Сохранить изменения'))
-    audit=send(s,owner,callback=button(card,'PDF с графиками').replace('rpdf:','raudit:'))
+    audit=send(s,owner,callback=button(card,'📄 Скачать PDF-отчёт').replace('rpdf:','raudit:'))
     raw=base64.b64decode(audit.generated_document).decode()
     assert '6500' in raw and '6000' not in raw
 
