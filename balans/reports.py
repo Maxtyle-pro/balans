@@ -47,6 +47,7 @@ class Reports:
             lines+=['',f"Расходы на {abs(percent)}% {'больше' if percent>=0 else 'меньше'}, чем за {prev_start:%d.%m.%Y} — {prev_end:%d.%m.%Y}."]
         return Reply('\n'.join(lines),[
             [('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],
+            [('🧾 Детализированный отчёт',f'rdetail:{identity}')],
             [('🤖 Анализ расходов',f'rask:{identity}')],
             [('📅 Изменить период','ui:go:report_period')],
             [('☰ Меню','ui:menu')]],command_hints=False)
@@ -114,11 +115,11 @@ class Reports:
             if job['kind']=='sheets':return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])
             if job['state']=='failed':c.execute("UPDATE report_jobs SET state='pending',reply=NULL,error_code=NULL WHERE id=%s",(job['id'],))
             return Reply('Проверяю задание…',report_job_id=str(job['id']))
-        if action not in ('rpdf','rcsv','raudit','rask','ranalyze','rsask','rexport'):return None
+        if action not in ('rdetail','rpdf','rcsv','raudit','rask','ranalyze','rsask','rexport'):return None
         identity,_,connection_token=raw.partition(':')
         report=self._get_report(c,identity)
         if not report:return Reply('Отчёт недоступен или истёк. /report — создать новый.')
-        if action in ('rpdf','rcsv','raudit'):return Reply('Готовлю файл…',report_id=str(report['id']),report_format={'rpdf':'pdf','rcsv':'csv','raudit':'auditcsv'}[action])
+        if action in ('rdetail','rpdf','rcsv','raudit'):return Reply('Готовлю файл…',report_id=str(report['id']),report_format={'rdetail':'detailed','rpdf':'pdf','rcsv':'csv','raudit':'auditcsv'}[action])
         if action=='rask':return self._analysis_consent(report)
         if action=='rsask':return self._sheets_consent(c,report)
         kind='analysis' if action=='ranalyze' else 'sheets';connection=None
@@ -136,7 +137,16 @@ class Reports:
         with self._actor_transaction(actor) as c:
             report=self._get_report(c,identity)
             if not report:return Reply('Отчёт недоступен или истёк. /report — создать новый.')
+            if format=='detailed':
+                from balans.detailed_report import collect_sources
+                try:sources,files=collect_sources(self,c,report)
+                except ValueError as exc:return Reply(str(exc),[[('📅 Изменить период','ui:go:report_period')]])
         snapshot=report['snapshot']
+        if format=='detailed':
+            from balans.detailed_report import render_detailed
+            try:data=render_detailed(snapshot,sources,files)
+            except ValueError as exc:return Reply(str(exc),[[('📅 Изменить период','ui:go:report_period')]])
+            return Reply('',generated_document=base64.b64encode(data).decode(),generated_filename=f"balans-detailed-{snapshot['start']}-{snapshot['end']}.pdf")
         data=render_pdf(snapshot) if format=='pdf' else csv_bytes(snapshot)
         return Reply('',generated_document=base64.b64encode(data).decode(),generated_filename=f"balans-{snapshot['start']}-{snapshot['end']}.{format}")
 

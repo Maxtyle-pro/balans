@@ -59,11 +59,11 @@ def daily_chart(days,monthly=False):
     return d
 
 
-def render_pdf(snapshot):
+def render_pdf(snapshot,include_operations=True):
     if snapshot.get('currency_reports'):
         from pypdf import PdfWriter
         writer=PdfWriter()
-        for child in snapshot['currency_reports']:writer.append(BytesIO(render_pdf(child)))
+        for child in snapshot['currency_reports']:writer.append(BytesIO(render_pdf(child,include_operations=include_operations)))
         out=BytesIO();writer.write(out);return out.getvalue()
     currency=snapshot.get('currency','RUB')
     register_fonts();out=BytesIO()
@@ -88,21 +88,22 @@ def render_pdf(snapshot):
         story += [p('На что потратили',heading),category_chart(summary['categories'])]
         story += [p(c['name']+' — '+cash(c['total'])+' · '+str(c['share'])+'%',small) for c in summary['categories']]
     else:story.append(p('За этот период расходов нет.'))
-    story += [PageBreak(),p('Все операции за период',heading)]
-    rows=sorted(snapshot['rows'],key=lambda r:(r['date'],r.get('id','')))
-    if rows:
-        data=[[p('Дата',small),p('Операция / категория',small),p('Сумма',small)]]
-        kinds={'expense':'Расход','income':'Доход','opening':'Начальный остаток','refund':'Возврат','transfer':'Перевод'}
-        for r in rows:
-            kind=r.get('kind','expense')
-            prefix='−' if kind=='expense' else '+' if kind in ('income','refund') else ''
-            detail=kinds.get(kind,kind)+'\n'+r['description']
-            if kind=='expense':detail+='\n'+r['category']
-            data.append([p(day(r['date']),small),p(detail,small),p(prefix+cash(r['amount']),small)])
-        table=Table(data,colWidths=[77,308,110],repeatRows=1,hAlign='LEFT')
-        table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#E6F3F4')),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),9),('LINEBELOW',(0,0),(-1,-1),.4,colors.HexColor('#DCE5ED'))]))
-        story.append(table)
-    else:story.append(p('За этот период записей нет.'))
+    if include_operations:
+        story += [PageBreak(),p('Все операции за период',heading)]
+        rows=sorted(snapshot['rows'],key=lambda r:(r['date'],r.get('id','')))
+        if rows:
+            data=[[p('Дата',small),p('Операция / категория',small),p('Сумма',small)]]
+            kinds={'expense':'Расход','income':'Доход','opening':'Начальный остаток','refund':'Возврат','transfer':'Перевод'}
+            for r in rows:
+                kind=r.get('kind','expense')
+                prefix='−' if kind=='expense' else '+' if kind in ('income','refund') else ''
+                detail=kinds.get(kind,kind)+'\n'+r['description']
+                if kind=='expense':detail+='\n'+r['category']
+                data.append([p(day(r['date']),small),p(detail,small),p(prefix+cash(r['amount']),small)])
+            table=Table(data,colWidths=[77,308,110],repeatRows=1,hAlign='LEFT')
+            table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#E6F3F4')),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),9),('LINEBELOW',(0,0),(-1,-1),.4,colors.HexColor('#DCE5ED'))]))
+            story.append(table)
+        else:story.append(p('За этот период записей нет.'))
     if snapshot.get('funds'):
         funds=snapshot['funds']
         story += [PageBreak(),p('Совместный бюджет',title),p(snapshot.get('workspace','')),p('Деньги в пути на конец периода: '+fmt(funds['transit'])+' '+currency,heading)]

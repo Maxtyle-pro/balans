@@ -106,7 +106,7 @@ class CurrencyFlow:
         for child in s['currency_reports']:
             q=child['summary'];currency=child['currency']
             lines.append(f"{currency}: расходы {money(Decimal(q['total']),currency)}, возвраты {money(Decimal(q['refunds']),currency)}, чистые расходы {money(Decimal(q['net_expenses']),currency)}, доходы {money(Decimal(q['income']),currency)}")
-        identity=report['id'];return Reply('\n'.join(lines)+'\nОбщий итог разных валют не вычисляется.',[[('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],[('🤖 Анализ расходов',f'rask:{identity}')],[('📅 Изменить период','ui:go:report_period')],[('☰ Меню','ui:menu')]])
+        identity=report['id'];return Reply('\n'.join(lines)+'\nОбщий итог разных валют не вычисляется.',[[('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],[('🧾 Детализированный отчёт',f'rdetail:{identity}')],[('🤖 Анализ расходов',f'rask:{identity}')],[('📅 Изменить период','ui:go:report_period')],[('☰ Меню','ui:menu')]])
 
     def _analysis_consent(self,report):
         if report['snapshot'].get('currency_reports'):return Reply('Для AI-анализа выберите одну валюту: /analyze месяц | currency=USD. Суммы разных валют не объединяются.')
