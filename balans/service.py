@@ -44,28 +44,16 @@ from balans.voice_ai import VoiceAI
 from balans.receipt_ai import ReceiptAI
 from balans.receipt_media import ReceiptStorage
 
-HELP = ('/subscription — подписка и оплата\n/diagnostic — передать снимок поддержке\n/budget — лимиты расходов\n/notify — уведомления\nБаланс — личный учёт расходов.\n\n'
-        '/add — добавить расход пошагово\n/add 850 — начать с суммы\n'
-        '/history — последние расходы (страницы: /history 2)\n'
-        '/report — отчёт за месяц или выбранный период\n/pdf — PDF с графиками\n/analyze — AI-анализ\n/csv — экспорт CSV\n/sheets — подключение Google Sheets\n/accounts — счёт и учётный остаток\n'
-        '/media — строки из изображений\n'
-        '/reviewqueue — очередь проверки\n/docquota — квоты документов\n'
-        '/docs — документы записи\n/attach — прикрепить документ\n/review — проверить запись\n/correction — запрос исправления\n/docpolicy — обязательные документы\n/periodclose — закрыть период\n/periodopen — открыть период\n'
-        '/funds — выдачи и сверка\n/issue — выдать средства\n/returnfunds — вернуть руководителю\n/claim — заявить приход\n/receive — подтвердить получение\n/reconcile — сверить приход\n/dispute — расхождение\n'
-        '/workspaces — выбор бюджета\n/workspace — создать совместный бюджет\n/invite — пригласить\n/join — вступить\n/members — участники\n'
-        '/batch — список из нескольких операций\n/search — поиск по описанию\n/categories — свои категории\n'
-        '/income — доход\n/account — создать счёт\n/opening — начальный остаток\n/transfer — перевод между счетами\n'
-        '/settings — настройки и часовой пояс\n/cancel — отменить черновик\n'
-        '/ai — включить AI-категоризацию\n/category — исправить категорию черновика\n'
-        '/rules — личные правила\n/rule — правило по словам\n/manual — ручной ввод\n'
-        '/receipts — фото и PDF-чек\n/voice — голосовой ввод\n'
-        '/support — поддержка\n/help — помощь\n\n'
-        'Можно отправить сообщение без команды. Распознанные операции записываются автоматически; исправления — кнопкой «Изменить». '
-        'Доступны личные и совместные бюджеты, RUB, USD и EUR. /privacy — приватность; /delete — удаление профиля; /exchange — обмен; /fx — ручной курс.')
+HELP = ('💡 Как пользоваться Балансом\n\n'
+        '➖ Отправьте текст, голосовое сообщение, фото чека или документ — я помогу записать операцию.\n'
+        '➕ Доход и начальный остаток добавляются отдельными кнопками.\n'
+        '📅 Если в файле нет даты, используется дата его отправки; её можно изменить в карточке.\n'
+        '✅ Сохранение выполняется автоматически или после подтверждения — согласно настройке.\n\n'
+        '📋 История, отчёты, баланс, категории, валюта и часовой пояс доступны через кнопки меню.')
 QUICK_HELP = ('💡 Как пользоваться Балансом\n\n'
               '✍️ Напишите «Кофе 250» или «Зарплата 50000».\n'
               '🎙 Отправьте голосовое сообщение или фото чека.\n'
-              '✅ Операция запишется автоматически. При необходимости нажмите «Изменить».\n\n'
+              '✅ Операция сохранится автоматически или после подтверждения — согласно настройке. При необходимости нажмите «Изменить».\n\n'
               '📊 История, отчёты, баланс и настройки — в меню «Все действия».')
 MENU = MAIN_BUTTONS
 
@@ -348,9 +336,9 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
         if command == '/files':return self._storage_overview(c)
         if command == '/help':
             intro=c.execute("SELECT value FROM service_content WHERE key='help_intro'").fetchone()
-            reply=self._ui_menu(c)
-            if intro:reply.text=intro['value']
-            return reply
+            if intro:
+                reply=self._ui_menu(c);reply.text=intro['value'];return reply
+            return Reply(HELP,MAIN_BUTTONS,command_hints=False)
         if command == '/support':
             return Reply(self.support or 'Контакт поддержки пока не настроен владельцем бота.')
         if command == '/cancel':

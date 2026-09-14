@@ -40,7 +40,10 @@ class AutomaticCapture:
             if d['receipt_currency'] not in (None,self._account_currency(c,d['account_id'])):return None
         if d['voice_edit_field'] or d['receipt_edit_field'] or d['finance_edit_field']:return None
         warnings=set(d['capture_warnings'])
-        if not d['occurred_on']:warnings.add('date')
+        # Receipt/image ingestion already falls back to the upload date. Keep
+        # the fallback warning for text and voice, where it still explains an
+        # uncertain date to the user.
+        if not d['occurred_on'] and not d['receipt_batch_id']:warnings.add('date')
         if not d['description']:warnings.add('description')
         category=d['category_id']
         if d['kind']=='expense' and not category:category=c.execute('SELECT uncategorized_category(%s) AS id',(d['workspace_id'],)).fetchone()['id']
@@ -74,7 +77,7 @@ class AutomaticCapture:
         warnings=[]
         if not item['occurred_on']:
             batch=c.execute('SELECT source_sent_at,timezone_snapshot FROM receipt_batches WHERE id=%s',(q['source_batch_id'],)).fetchone()
-            item['occurred_on']=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date().isoformat();warnings.append('date')
+            item['occurred_on']=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date().isoformat()
         if not item['description'] and not item['merchant']:item['description']='Без описания';warnings.append('description')
         if item['kind']=='expense' and not item['category_id']:item['category_id']=str(c.execute('SELECT uncategorized_category(%s) AS id',(q['workspace_id'],)).fetchone()['id'])
         item.update(paid=True,duplicate_confirmed=True,capture_warnings=warnings)

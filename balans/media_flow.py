@@ -26,6 +26,9 @@ class MediaFlow:
             item=dict(raw)
             if not item.get('currency'):item['currency']=self._account_currency(c,batch['account_id'])
             if item['occurred_on'] and datetime.strptime(item['occurred_on'],'%Y-%m-%d').date()>today:item['occurred_on']=None
+            # For files, the upload message is the best available date. Do not
+            # turn this deterministic fallback into a warning for the user.
+            if not item['occurred_on']:item['occurred_on']=today.isoformat()
             item.update(state='pending',account=str(batch['account_id']),destination=None,refund=None,paid=False,duplicate_confirmed=False,source_type=result.get('source_type') if result.get('source_type') in ('receipt','screenshot','terminal') else None)
             if item['kind']=='expense':
                 rule=self._rule(c,{'workspace_id':batch['workspace_id'],'description':item['description'] or item['merchant']})

@@ -83,3 +83,11 @@ def test_wrong_user_cannot_confirm_erasure(private_service):
     r=send(s,u,'/delete');send(s,v,'/start')
     assert 'истекло' in send(s,v,callback=button(r,'Подтверждаю удаление личного профиля')).text
     assert 'расход' in send(s,u,'/manual 10').text.lower() or send(s,u,'/history').text
+
+
+def test_privacy_copy_matches_default_recognition(private_service):
+    s=private_service;u=next(USERS)
+    text=send(s,u,'/privacy').text
+    assert 'включено по умолчанию' in text
+    assert 'отдельное разрешение перед отправкой файла не требуется' in text
+    assert 'отдельного согласия для текста' not in text

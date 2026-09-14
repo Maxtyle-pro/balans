@@ -1,4 +1,4 @@
-"""Explicit consent, private retention choices and durable account erasure."""
+"""Service consent, private retention choices and durable account erasure."""
 from contextlib import contextmanager
 from datetime import datetime,timezone
 from pathlib import Path
@@ -90,14 +90,14 @@ class Privacy:
             return Reply('Хранение личных оригиналов после обработки: '+('до 90 дней' if row['keep_personal_originals'] else 'выключено')+'. При выключении существующие личные оригиналы удалятся при ближайшей очистке. Для общих документов действует срок 90 дней. Перед удалением предложим платное продление.\n/retention on или off')
         if command=='/privacy':
             p=c.execute('SELECT * FROM privacy_policy').fetchone()
-            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. AI вызывается после отдельного согласия для текста, голоса и изображений.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 90 дней; /retention off отключает хранение после обработки. Общие оригиналы — 90 дней. Перед удалением предложим платное продление на 90 дней.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
+            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. После принятия условий сервиса распознавание текста, голоса и изображений включено по умолчанию; отдельное разрешение перед отправкой файла не требуется. Каналы можно отключить командами /ai off, /voice off и /receipts off.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 90 дней; /retention off отключает хранение после обработки. Общие оригиналы — 90 дней. Перед удалением предложим платное продление на 90 дней.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
         return None
 
     def _privacy_callback(self,c,user,callback):
         if not callback.startswith('privacyaccept:'):return None
         p=c.execute('SELECT * FROM privacy_policy').fetchone()
         if int(callback.split(':')[1])!=p['version'] or not p['terms_url'] or not p['privacy_url']:return Reply('Условия изменились или не опубликованы. /privacy')
-        c.execute('UPDATE user_settings SET service_consent_version=%s,service_consented_at=now() WHERE user_id=%s',(p['version'],user));return Reply('Согласие сохранено. Разрешения на передачу данных AI включаются отдельно: /ai, /receipts, /voice.')
+        c.execute('UPDATE user_settings SET service_consent_version=%s,service_consented_at=now() WHERE user_id=%s',(p['version'],user));return Reply('Согласие сохранено. Распознавание текста, голоса и изображений включено по умолчанию. Отключить каналы можно командами /ai off, /voice off и /receipts off.')
 
     def process_erasures(self):
         with self.pool.connection() as c,c.transaction():

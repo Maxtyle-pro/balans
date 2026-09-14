@@ -79,3 +79,11 @@ def test_automatic_features_have_no_settings_switches(service):
         r=send(service,u,callback=cb)
         assert r.buttons==[[('☰ Меню','ui:menu')]]
         assert 'автоматически' in r.text
+
+
+def test_ai_on_and_off_commands_reach_text_ai_settings(service,database):
+    u=next(USERS)
+    assert 'выключено' in send(service,u,'/ai off').text
+    assert query(database,u,'SELECT ai_enabled FROM user_settings')==[(False,)]
+    assert 'включено' in send(service,u,'/ai on').text
+    assert query(database,u,'SELECT ai_enabled FROM user_settings')==[(True,)]

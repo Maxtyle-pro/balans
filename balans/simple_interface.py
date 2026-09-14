@@ -16,7 +16,7 @@ TIMEZONES={'Europe/Moscow':'Москва · UTC+3','Europe/London':'Лондон
 class SimpleInterface(CategorySettings):
     def _ui_menu(self,c,section=''):
         if section in ('preferences','privacy'):return self._simple_settings(c)
-        return Reply('💰 Баланс\n\nОтправьте текст, голосовое, фото или документ — я запишу операцию.\nИли выберите действие:',MAIN_BUTTONS)
+        return Reply('💰 Баланс\n\nОтправьте текст, голосовое, фото или документ — я помогу записать операцию.\nИли выберите действие:',MAIN_BUTTONS)
 
     def _simple_settings(self,c):
         row=c.execute('SELECT timezone FROM user_settings WHERE user_id=actor_user_id()').fetchone()
@@ -46,7 +46,7 @@ class SimpleInterface(CategorySettings):
         command=text.split(maxsplit=1)[0].split('@')[0].lower() if text.strip() else ''
         if command=='/notify' or callback and (callback in ('monthlysettings','monthlyon','monthlyoff','ui:go:notify') or callback.startswith('ui:go:notify_')):
             return Reply('🔔 Ежемесячный отчёт, предупреждения о лимите ИИ и сроке хранения файлов приходят автоматически.',[[('☰ Меню','ui:menu')]])
-        if (command=='/ai' or command in ('/voice','/receipts') and text.split()[1:]==['off']) or callback and (callback=='ui:section:recognition' or callback in ('ui:go:ai','ui:go:voice','ui:go:receipts','ai_off') or callback in ('ui:go:ai_off','ui:go:voice_off','ui:go:receipts_off')):
+        if (command=='/ai' and not text.split()[1:]) or (command in ('/voice','/receipts') and text.split()[1:]==['off']) or callback and (callback=='ui:section:recognition' or callback in ('ui:go:ai','ui:go:voice','ui:go:receipts','ai_off') or callback in ('ui:go:ai_off','ui:go:voice_off','ui:go:receipts_off')):
             return Reply('Отправьте текст, голосовое, фото или документ — распознавание работает автоматически.',[[('☰ Меню','ui:menu')]])
         if callback=='ui:go:settings_zone':
             c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))

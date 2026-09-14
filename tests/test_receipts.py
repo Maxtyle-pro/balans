@@ -140,11 +140,23 @@ def test_missing_fields_are_requested(receipts,database):
     ai.changes.pop('category_id')
     card=review(s,user)
     assert 'введите сумму' in card.text
-    assert 'дату покупки' in send(s,user,'123,45').text
-    assert 'Продавец:' in send(s,user,'сегодня').text
-    saved=save(s,user,send(s,user,'/add'))
+    after_amount=send(s,user,'123,45')
+    assert 'Дата: '+NOW.strftime('%d.%m.%Y') in after_amount.text
+    assert 'Продавец:' in after_amount.text
+    saved=save(s,user,after_amount)
     assert '123,45' in saved.text
-    assert query(database,user,'SELECT amount,occurred_on FROM operation_revisions')==[(Decimal('123.45'),NOW.date())]
+    assert query(database,user,'SELECT amount,occurred_on,capture_warnings FROM operation_revisions')==[(Decimal('123.45'),NOW.date(),[])]
+
+
+def test_missing_date_uses_upload_date_without_warning(receipts,database):
+    s,ai,_=receipts;user=next(USERS)
+    ai.changes={'occurred_on':None}
+    send(s,user,callback='captureon')
+    card=review(s,user)
+    assert card.text.startswith('✅ Расход записан')
+    assert '📅 '+NOW.strftime('%d.%m.%Y') in card.text
+    assert 'дата сообщения' not in card.text
+    assert query(database,user,'SELECT occurred_on,capture_warnings FROM operation_revisions')==[(NOW.date(),[])]
 
 
 def test_edit_and_duplicate_guard(receipts,database):

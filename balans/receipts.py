@@ -271,14 +271,14 @@ class Receipts:
         elif result['currency'] not in (None,self._account_currency(c,batch['account_id'])):
             state='failed';reply=Reply(f"В чеке валюта {result['currency']}. Сейчас счёт поддерживает {self._account_currency(c,batch['account_id'])}; расход не сохранён. Автоматическая конвертация не выполняется.")
         else:
+            today=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date()
             day=None
             if result['occurred_on']:
                 day=datetime.strptime(result['occurred_on'],'%Y-%m-%d').date()
-                today=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date()
                 if day>today:
-                    day=None;result['warnings'].append('Дата в будущем — укажите верную дату вручную.')
+                    day=None
             if not day:
-                result['warnings'].append('Дата не прочитана. Подтвердите дату вручную; «сегодня» относится к моменту отправки чека.')
+                day=today
             description=(result['merchant'] or '')
             if result['items']:
                 description+=(' · ' if description else '')+', '.join(line['name'] for line in result['items'][:2])

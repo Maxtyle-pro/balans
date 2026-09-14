@@ -113,8 +113,10 @@ def test_media_unknown_category_and_date(receipts,database):
     s,ai,_=receipts;u=next(USERS);enable(s,u)
     item=transaction(None);item['occurred_on']=None
     card=extracted(s,ai,u,[item]);check(card)
-    assert '⚠️ Без категории' in card.text and 'дата сообщения' in card.text
-    assert query(database,u,'SELECT capture_warnings FROM operation_revisions')==[(['date'],)]
+    assert '⚠️ Без категории' in card.text
+    assert '📅 '+NOW.strftime('%d.%m.%Y') in card.text
+    assert 'дата сообщения' not in card.text
+    assert query(database,u,'SELECT occurred_on,capture_warnings FROM operation_revisions')==[(NOW.date(),[])]
 
 def test_receipt_missing_amount(receipts,database):
     s,ai,_=receipts;u=next(USERS);enable(s,u)
