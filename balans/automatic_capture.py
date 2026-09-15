@@ -141,9 +141,27 @@ class AutomaticCapture:
             cards.append(card)
         q=c.execute('SELECT * FROM media_queues WHERE id=%s',(q['id'],)).fetchone()
         for index,card in enumerate(cards):
-            if card is None:cards[index]=self._media_card(c,q,index)
+            if card is None:cards[index]=self._media_auto_fallback(c,q,index)
         if not any(item['state']=='pending' for item in c.execute('SELECT items FROM media_queues WHERE id=%s',(q['id'],)).fetchone()['items']):c.execute("UPDATE media_queues SET state='done' WHERE id=%s",(q['id'],))
         return self._capture_combine(cards)
+
+    def _media_auto_fallback(self,c,q,index):
+        item=q['items'][index]
+        suffix=f"{q['id']}:{index}:{q['version']}"
+        if item['kind']=='incoming':
+            return Reply('Это доход или начальный остаток?',[[('Доход',f'mkind:income:{suffix}'),('Начальный остаток',f'mkind:opening:{suffix}')]])
+        if item.get('payment_status')=='failed':
+            text='⚠️ На изображении операция не завершена. Расход не записан.'
+        elif duplicates:=self._media_duplicates(c,item):
+            text='Возможный дубль: такой расход уже есть в истории.'
+            buttons=[]
+            for candidate in duplicates:
+                token=c.execute('INSERT INTO fund_confirmations(workspace_id,author_user_id,payload) VALUES(current_workspace(),actor_user_id(),%s) RETURNING id',(Jsonb({'action':'media_candidate','queue':str(q['id']),'index':index,'version':q['version'],'operation':str(candidate['id'])}),)).fetchone()['id']
+                buttons.append([(f"Прикрепить к {candidate['description'][:35]}",f'mlink:{token}')])
+            return Reply(text,buttons,command_hints=False)
+        else:
+            text='⚠️ Не получилось записать операцию автоматически. Проверьте данные.'
+        return Reply(text,[[('Проверить данные',f'mreview:{suffix}')],[('Не записывать',f'mdrop:{suffix}')]],command_hints=False)
 
     def _capture_combine(self,cards):
         if not cards:return Reply('Нет операций для записи.')

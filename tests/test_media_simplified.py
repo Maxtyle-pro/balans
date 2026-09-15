@@ -89,6 +89,31 @@ def test_screenshot_multiple_transactions_group_and_bulk_category(receipts,datab
     assert all(len(data.encode())<=64 for row in menu.buttons for _,data in row)
 
 
+def test_auto_screenshot_saves_one_same_category_purchase(receipts,database):
+    s,ai,_=receipts;u=next(USERS);send(s,u,'/start');send(s,u,callback='receipts_on');send(s,u,callback='captureon')
+    food=category(database,u)
+    ai.changes={'source_type':'terminal','document_kind':'multiple','transactions':[transaction(food,'100',status='pending'),transaction(food,'50',status='unknown')]}
+    bot=MediaBot(photo_bytes());asyncio.run(process_update(bot,s,photo_update(u,next(IDS))))
+    assert len(bot.messages)==1
+    text,kwargs=bot.messages[0]
+    assert text.startswith('✅ Расход записан')
+    assert 'Подтвердите' not in text and 'Операция 1' not in text
+    assert [button.text for row in kwargs['reply_markup'].inline_keyboard for button in row]==['✏️ Изменить']
+    assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
+    assert query(database,u,'SELECT amount FROM operation_revisions')==[(Decimal('150'),)]
+
+
+def test_auto_failed_image_is_not_saved(receipts,database):
+    s,ai,_=receipts;u=next(USERS);send(s,u,'/start');send(s,u,callback='receipts_on');send(s,u,callback='captureon')
+    food=category(database,u)
+    ai.changes={'source_type':'terminal','document_kind':'multiple','transactions':[transaction(food,'100',status='failed')]}
+    bot=MediaBot(photo_bytes());asyncio.run(process_update(bot,s,photo_update(u,next(IDS))))
+    assert query(database,u,'SELECT count(*) FROM operations')==[(0,)]
+    text,kwargs=bot.messages[0]
+    assert 'операция не завершена' in text
+    assert all(button.text not in ('Сохранить эту строку','Операция совершена','Ещё не совершена','К списку') for row in kwargs['reply_markup'].inline_keyboard for button in row)
+
+
 def test_album_collected_automatically_one_result(receipts):
     s,ai,_=receipts;u=next(USERS);bot=MediaBot(photo_bytes())
     first=photo_update(u,next(IDS)).model_copy(deep=True)

@@ -92,12 +92,12 @@ def test_voice_auto(voices,database):
 def test_media_multiple_auto(receipts,database):
     s,ai,_=receipts;u=next(USERS);enable(s,u);cat=category(database,u)
     card=extracted(s,ai,u,[transaction(cat),transaction(cat,'250')]);check(card)
-    assert len(card.additional_replies)==1
-    assert query(database,u,'SELECT count(*) FROM operations')==[(2,)]
+    assert not card.additional_replies
+    assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert query(database,u,'SELECT state FROM media_queues')==[('done',)]
     again=extracted(s,ai,u,[transaction(cat),transaction(cat,'250')])
     assert 'уже записан' in again.text
-    assert query(database,u,'SELECT count(*) FROM operations')==[(2,)]
+    assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
 
 from test_categorization import ai_service
 

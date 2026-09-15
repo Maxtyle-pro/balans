@@ -1,4 +1,4 @@
-"""Individually confirmed operations extracted from financial images."""
+"""Operations extracted from financial images."""
 from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal
@@ -10,6 +10,27 @@ from balans.finance import KINDS
 from balans.receipt_ai import mask,number
 
 class MediaFlow:
+    def _media_aggregate_expenses(self,items):
+        """Combine one photographed purchase when AI found same-category rows."""
+        if len(items)<2 or any(item.get('kind')!='expense' for item in items):
+            return items
+        key=lambda item:(item.get('currency'),item.get('occurred_on'),item.get('category_id'),item.get('account'))
+        if len({key(item) for item in items})!=1:
+            return items
+        first=dict(items[0])
+        first['amount']=str(sum(Decimal(item['amount']) for item in items if item.get('amount') is not None))
+        descriptions={item.get('description') for item in items if item.get('description')}
+        merchants={item.get('merchant') for item in items if item.get('merchant')}
+        first['description']=next(iter(descriptions)) if len(descriptions)==1 else next(iter(merchants),None) or 'Покупка'
+        first['items']=[line for item in items for line in item.get('items',[])]
+        first['items_complete']=bool(first['items']) and all(item.get('items_complete',False) for item in items)
+        first['confidence_amount']=min(item.get('confidence_amount',1) for item in items)
+        first['payment_status']='paid' if all(item.get('payment_status')=='paid' for item in items) else 'unknown'
+        references={item.get('reference_hash') for item in items}
+        first['reference_hash']=next(iter(references)) if len(references)==1 else None
+        first['warnings']=list(dict.fromkeys(warning for item in items for warning in item.get('warnings',[])))
+        return [first]
+
     def _media_queue(self,c):
         c.execute("UPDATE media_queues SET state='cancelled' WHERE state='active' AND expires_at<=now()")
         q=c.execute("SELECT * FROM media_queues WHERE state='active'").fetchone()
@@ -21,6 +42,7 @@ class MediaFlow:
 
     def _media_finish(self,c,batch,result):
         today=batch['source_sent_at'].astimezone(ZoneInfo(batch['timezone_snapshot'])).date()
+        automatic=self._capture_enabled(c)
         items=[]
         for raw in result['transactions']:
             item=dict(raw)
@@ -29,12 +51,21 @@ class MediaFlow:
             # For files, the upload message is the best available date. Do not
             # turn this deterministic fallback into a warning for the user.
             if not item['occurred_on']:item['occurred_on']=today.isoformat()
-            item.update(state='pending',account=str(batch['account_id']),destination=None,refund=None,paid=False,duplicate_confirmed=False,source_type=result.get('source_type') if result.get('source_type') in ('receipt','screenshot','terminal') else None)
+            # In automatic image mode receiving a clear expense is the user's
+            # request to record it. A pending/unknown screen is still useful
+            # evidence of the amount, while an explicit failure is not a
+            # completed expense and remains for review.
+            paid=item['kind']=='expense' and item.get('payment_status')!='failed' if automatic else False
+            if item['kind'] in ('income','opening'):
+                paid=item.get('payment_status')=='paid' if automatic else False
+            item.update(state='pending',account=str(batch['account_id']),destination=None,refund=None,paid=paid,duplicate_confirmed=False,source_type=result.get('source_type') if result.get('source_type') in ('receipt','screenshot','terminal') else None)
             if item['kind']=='expense':
                 rule=self._rule(c,{'workspace_id':batch['workspace_id'],'description':item['description'] or item['merchant']})
                 if rule:item['category_id']=rule
             item['suggested_category']=item['category_id']
             items.append(item)
+        if automatic:
+            items=self._media_aggregate_expenses(items)
         queue=c.execute('INSERT INTO media_queues(workspace_id,author_user_id,source_batch_id,items) VALUES(%s,%s,%s,%s) RETURNING *',(batch['workspace_id'],batch['author_user_id'],batch['id'],Jsonb(items))).fetchone()
         if self._capture_enabled(c):return self._capture_media(c,queue)
         return self._media_card(c,queue,0) if len(items)==1 else self._media_list(c,queue,grouped=True)
