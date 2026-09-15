@@ -68,7 +68,10 @@ class Finance(OperationEditor):
     def _finance_prompt(self,c,d):
         CURRENCY.set(self._account_currency(c,d['account_id']))
         if d['finance_edit_field']:
-            return self._editor_reply(d,Reply({'amount':'Введите новую сумму. Для отрицательного начального остатка используйте минус.', 'date':'Введите новую дату: сегодня, вчера или ДД.ММ.ГГГГ.', 'description':'Введите новое описание, до 500 символов.', 'destination':'Введите точное название счёта получателя.', 'account':'Введите точное название счёта.', 'received':'Введите фактически зачисленную сумму в валюте счёта получателя.', 'reason':'Укажите причину отмены, до 500 символов.'}[d['finance_edit_field']],[[('Отмена',f"cancel:{d['id']}:{d['version']}")]]))
+            prompts={'amount':'Введите новую сумму.', 'date':'Введите новую дату: сегодня, вчера или ДД.ММ.ГГГГ.', 'description':'Введите новое описание, до 500 символов.', 'destination':'Введите точное название счёта получателя.', 'account':'Введите точное название счёта.', 'received':'Введите фактически зачисленную сумму в валюте счёта получателя.', 'reason':'Укажите причину отмены, до 500 символов.'}
+            prompt=prompts[d['finance_edit_field']]
+            if d['finance_edit_field']=='amount' and d['kind']=='opening':prompt+=' Для отрицательного начального остатка используйте минус.'
+            return self._editor_reply(d,Reply(prompt,[[('Отмена',f"cancel:{d['id']}:{d['version']}")]]))
         if d['step']=='amount':return Reply('Введите сумму в валюте учёта '+CURRENCY.get()+'. /cancel — отмена.')
         suffix=f"{d['id']}:{d['version']}"
         text=(('Отмена операции' if d['cancel_operation'] else ('Исправление: ' if d['edit_operation_id'] else '')+KINDS[d['kind']])+f"\nСумма: {money(-d['amount'] if d['opening_negative'] else d['amount'])}\n"

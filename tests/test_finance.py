@@ -62,7 +62,9 @@ def test_revision_and_stale_callbacks(service,database):
     identity=operation(database,u,'expense');card=send(s,u,callback='fedit:'+identity)
     assert 'Сохранить изменения' not in [label for row in card.buttons for label,_ in row]
     stale=button(card,'Отмена').replace('cancel:','fsave:')
-    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'150')
+    amount_prompt=send(s,u,callback=button(card,'Изменить сумму'))
+    assert 'отрицательного начального остатка' not in amount_prompt.text
+    card=send(s,u,'150')
     assert '150,00' in card.text
     assert [label for row in card.buttons for label,_ in row]==['✏️ Изменить']
     stale_reply=send(s,u,callback=stale)
@@ -94,6 +96,8 @@ def test_private_operations_and_opening_once(service,database):
     reopened=send(s,u,'/opening 500')
     assert 'уже задан' in reopened.text
     assert 'Сохранить изменения' not in [label for row in reopened.buttons for label,_ in row]
+    opening_amount=send(s,u,callback=button(reopened,'Изменить сумму'))
+    assert 'отрицательного начального остатка' in opening_amount.text
     assert balances(database,u)['Основной']==-100
     assert query(database,other,'SELECT * FROM postings')==[]
 
