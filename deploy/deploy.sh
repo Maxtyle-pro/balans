@@ -20,7 +20,18 @@ docker build --label "org.opencontainers.image.revision=$revision" -t "$BALANS_I
 
 # Stop the sole receiver before changing the schema.
 "${compose[@]}" stop bot
-trap 'echo "Deployment failed. Inspect the server; the database is not rolled back automatically." >&2' ERR
+deployment_failed() {
+  local status=$?
+  trap - ERR
+  echo "Deployment failed. Inspect the server; the database is not rolled back automatically." >&2
+  "${compose[@]}" ps >&2 || true
+  if [[ -n ${container_id:-} ]]; then
+    docker inspect --format 'container={{.Name}} state={{.State.Status}} running={{.State.Running}} restarts={{.RestartCount}} exit={{.State.ExitCode}}' "$container_id" >&2 || true
+    docker logs --tail 120 "$container_id" >&2 || true
+  fi
+  exit "$status"
+}
+trap deployment_failed ERR
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --tmpfs /tmp:size=64m,mode=1777 \
   --add-host host.docker.internal:host-gateway \
