@@ -79,7 +79,7 @@ def test_shared_report_member_scope_and_revision_snapshot(service,database):
     assert '900,00' not in card.text
     operation=str(query(database,u,"SELECT id FROM operations WHERE kind='expense'")[0][0])
     edit=send(s,u,callback='fedit:'+operation)
-    send(s,u,callback=button(edit,'Изменить сумму'));edit=send(s,u,'6000');send(s,u,callback=button(edit,'Сохранить изменения'))
+    send(s,u,callback=button(edit,'Изменить сумму'));edit=send(s,u,'6000')
     audit=send(s,owner,callback=button(card,'📄 Скачать PDF-отчёт').replace('rpdf:','raudit:'))
     raw=base64.b64decode(audit.generated_document).decode()
     assert '6500' in raw and '6000' not in raw

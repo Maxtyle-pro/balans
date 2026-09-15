@@ -25,6 +25,22 @@ class OperationEditor:
         if current_message_id is not None:ids.append(int(current_message_id))
         return list(dict.fromkeys(ids))
 
+    def _finish_editor_change(self,c,d,message_id=None):
+        """Save one submitted field and update the original Telegram card in place."""
+        if not d or not d.get('edit_operation_id') or d.get('cancel_operation'):
+            return None
+        try:
+            operation=self._save_operation(c,d['id'])
+        except ValueError as exc:
+            reply=self._finance_prompt(c,d)
+            reply.text='Изменение пока не сохранено: '+str(exc)+'\n\n'+reply.text
+            return self._editor_reply(d,reply)
+        reply=self._capture_card(c,operation)
+        reply.delete_message_ids=self._editor_cleanup_ids(d,message_id,include_origin=False)
+        if d.get('edit_origin_message_id') is not None:
+            reply.edit_message_id=int(d['edit_origin_message_id'])
+        return reply
+
     def _editor_original(self,c,d):
         return c.execute('SELECT o.kind,o.state,o.current_revision_id,r.* FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.id=%s AND o.created_by_user_id=actor_user_id()',(d['edit_operation_id'],)).fetchone()
 

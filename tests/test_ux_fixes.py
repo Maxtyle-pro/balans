@@ -19,19 +19,23 @@ def hidden_action(reply,value):
     _,draft_id,version=button(reply,'Отмена').split(':')
     return f'faction:{value}:{draft_id}:{version}'
 
+def legacy_save(reply):
+    """Exercise the retained save callback without exposing it in the editor UI."""
+    return button(reply,'Отмена').replace('cancel:','fsave:')
+
 def test_type_change_reverses_journal_and_keeps_history(service,database):
     s=service;u=next(USERS);enable(s,u)
     card=send(s,u,'Кофе 250 сегодня')
     picker=send(s,u,callback=hidden_action(edit(s,u,card),'type'))
     changed=send(s,u,callback=button(picker,'Доход'))
     assert query(database,u,'SELECT kind FROM operations')==[('expense',)]
-    saved=send(s,u,callback=button(changed,'Сохранить изменения'))
+    saved=send(s,u,callback=legacy_save(changed))
     assert 'Доход записан' in saved.text
     assert query(database,u,'SELECT sum(delta) FROM postings')==[(Decimal('250'),)]
     assert query(database,u,'SELECT operation_kind FROM operation_revisions ORDER BY revision_no')==[('expense',),('income',)]
     picker=send(s,u,callback=hidden_action(edit(s,u,saved),'type'))
     changed=send(s,u,callback=button(picker,'Расход'))
-    send(s,u,callback=button(changed,'Сохранить изменения'))
+    send(s,u,callback=legacy_save(changed))
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert query(database,u,'SELECT sum(delta) FROM postings')==[(Decimal('-250'),)]
 
@@ -147,7 +151,8 @@ def test_report_refresh_and_csv(service,database):
     csv=send(s,u,callback=button(report,'📑 CSV за период'))
     assert csv.generated_filename.endswith('.csv')
     editor=edit(s,u,card);send(s,u,callback=button(editor,'Изменить сумму'))
-    preview=send(s,u,'300');send(s,u,callback=button(preview,'Сохранить изменения'))
+    preview=send(s,u,'300')
+    assert [label for row in preview.buttons for label,_ in row]==['✏️ Изменить']
     refreshed=send(s,u,callback=button(report,'🔄 Обновить'))
     assert 'Расходы — 300,00' in refreshed.text
     assert 'Расходы — 250,00' in report.text
@@ -191,7 +196,7 @@ def test_type_change_does_not_break_refund_or_other_users(service,database):
     assert 'устарела' in send(s,other,callback=hidden_action(editor,'delete')).text
     types=send(s,u,callback=hidden_action(editor,'type'))
     changed=send(s,u,callback=button(types,'Доход'))
-    error=send(s,u,callback=button(changed,'Сохранить изменения'))
+    error=send(s,u,callback=legacy_save(changed))
     assert 'возвраты' in error.text
     assert query(database,u,'SELECT sum(delta) FROM postings')==[(Decimal('-200'),)]
     assert sorted(query(database,u,'SELECT kind FROM operations'))==[('expense',),('refund',)]

@@ -118,7 +118,7 @@ class Categorization:
             reply.buttons.append([('Запомнить для меня',f"learn:{f['id']}")])
         return reply
 
-    def _select_category(self, c, d, category_id):
+    def _select_category(self, c, d, category_id, message_id=None):
         old = d['category_id']
         if d['description'] is None:
             step='description'
@@ -126,6 +126,8 @@ class Categorization:
             step='confirm' if d['occurred_on'] is not None else 'date'
         version=d['version']+1
         c.execute("UPDATE operation_drafts SET category_id=%s,category_source='manual',step=%s,version=%s WHERE id=%s", (category_id,step,version,d['id']))
+        if d.get('edit_operation_id') and not d.get('cancel_operation'):
+            return self._finish_editor_change(c,self._draft(c),message_id)
         reply=self._prompt(c,self._draft(c))
         if d['description'] and old != category_id:
             feedback=c.execute('INSERT INTO category_feedback(workspace_id,author_user_id,draft_id,old_category_id,new_category_id,description,expected_version) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id',
@@ -154,7 +156,7 @@ class Categorization:
                 return self._prompt(c,self._draft(c))
             if action=='recat':
                 c.execute("UPDATE operation_drafts SET step='category',version=version+1 WHERE id=%s",(draft_id,))
-                return self._category_menu(c,self._draft(c))
+                return self._editor_reply(d,self._category_menu(c,self._draft(c)))
             if d['step']!='category' or len(parts)!=3:
                 return Reply('Выбор категории уже завершён.')
             categories=self._categories(c,d['workspace_id'])
@@ -164,7 +166,7 @@ class Categorization:
                     raise ValueError
             except ValueError:
                 return Reply('Недействительная категория.')
-            return self._select_category(c,d,categories[index]['id'])
+            return self._select_category(c,d,categories[index]['id'],message_id)
         if action=='opcat':
             try:
                 operation_id=UUID(args)

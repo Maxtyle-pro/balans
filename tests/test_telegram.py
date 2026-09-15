@@ -13,6 +13,7 @@ class FakeBot:
         self.messages=[]
         self.sent_ids=[]
         self.deleted=[]
+        self.edited=[]
         self._next_message_id=900000
         self.fail=fail
 
@@ -31,6 +32,9 @@ class FakeBot:
 
     async def delete_message(self, chat_id, message_id):
         self.deleted.append((chat_id,message_id))
+
+    async def edit_message_text(self, text, chat_id, message_id, **kwargs):
+        self.edited.append((chat_id,message_id,text,kwargs))
 
 
 def update(number, text=None, chat_type='private', query=None, message_id=None):
@@ -122,14 +126,10 @@ def test_edit_replaces_original_card_and_temporary_editor_messages(service):
     prompt_id=bot.sent_ids[-1]
     save_input=update(50112,'150')
     asyncio.run(process_update(bot,service,save_input))
-    changed_editor_id=bot.sent_ids[-1]
-    changed=bot.messages[-1][2]['reply_markup'].inline_keyboard
-    changed_labels=[b.text for row in changed for b in row]
-    assert changed_labels==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Сохранить изменения','Отмена']
-
-    save_callback=next(b.callback_data for row in changed for b in row if b.text=='Сохранить изменения')
-    asyncio.run(process_update(bot,service,update(50113,query=save_callback,message_id=changed_editor_id)))
-    assert {original_card_id,editor_id,prompt_id,changed_editor_id} <= {message_id for _,message_id in bot.deleted}
-    new_card=bot.messages[-1][2]['reply_markup'].inline_keyboard
+    assert bot.sent_ids==[original_card_id,editor_id,prompt_id]
+    assert {editor_id,prompt_id,50112} <= {message_id for _,message_id in bot.deleted}
+    assert original_card_id not in {message_id for _,message_id in bot.deleted}
+    assert bot.edited[-1][1]==original_card_id
+    assert '150,00' in bot.edited[-1][2]
+    new_card=bot.edited[-1][3]['reply_markup'].inline_keyboard
     assert [b.text for row in new_card for b in row]==['✏️ Изменить']
-    assert bot.sent_ids[-1] not in {message_id for _,message_id in bot.deleted}

@@ -104,7 +104,18 @@ async def deliver_reply(bot,chat_id,reply,service=None):
             await bot.delete_message(chat_id,message_id)
         except (TelegramBadRequest,TelegramForbiddenError):
             pass
-    if reply.text:
+    if reply.edit_message_id is not None and reply.text:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=data) for label, data in row]
+            for row in reply.buttons]) if reply.buttons else None
+        try:
+            await bot.edit_message_text(reply.text,chat_id=chat_id,message_id=reply.edit_message_id,
+                                        reply_markup=keyboard,parse_mode=reply.parse_mode)
+        except TelegramBadRequest as exc:
+            if 'message is not modified' not in str(exc).lower():
+                log.warning('Не удалось отредактировать карточку операции (%s)',type(exc).__name__)
+                await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
+    elif reply.text:
         sent=await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
         if reply.edit_draft_id and service and sent and getattr(sent,'message_id',None):
             await asyncio.to_thread(service.track_edit_message,chat_id,reply.edit_draft_id,sent.message_id)

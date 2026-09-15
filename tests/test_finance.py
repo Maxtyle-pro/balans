@@ -63,17 +63,17 @@ def test_revision_and_stale_callbacks(service,database):
     assert 'Сохранить изменения' not in [label for row in card.buttons for label,_ in row]
     stale=button(card,'Отмена').replace('cancel:','fsave:')
     send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'150')
+    assert '150,00' in card.text
+    assert [label for row in card.buttons for label,_ in row]==['✏️ Изменить']
     stale_reply=send(s,u,callback=stale)
     assert 'устарела' in stale_reply.text
     assert not any(label=='Продолжить' for row in stale_reply.buttons for label,_ in row)
     assert button(stale_reply,'Открыть историю')=='history'
-    saved=button(card,'Сохранить изменения')
-    with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(lambda _:send(s,u,callback=saved),range(2)))
     assert balances(database,u)['Основной']==-150
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(2,)]
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert '150,00' in send(s,u,'/report').text
-    card=send(s,u,callback='fedit:'+identity);send(s,u,callback=button(card,'Изменить дату'));card=send(s,u,'вчера');confirm(s,u,card)
+    card=send(s,u,callback='fedit:'+identity);send(s,u,callback=button(card,'Изменить дату'));card=send(s,u,'вчера')
     assert balances(database,u)['Основной']==-150
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(3,)]
 
@@ -82,7 +82,7 @@ def test_transfer_edit_reverses_both_sides(service,database):
     s=service;u=next(USERS);send(s,u,'/account Наличные')
     confirm(s,u,send(s,u,'/transfer 500 | Наличные'))
     card=send(s,u,callback='fedit:'+operation(database,u,'transfer'))
-    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'200');confirm(s,u,card)
+    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'200')
     assert balances(database,u)=={'Основной':Decimal(-200),'Наличные':Decimal(200)}
 
 
@@ -104,6 +104,6 @@ def test_changed_category_keeps_financial_correction_valid(service,database):
     menu=send(s,u,callback='opcat:'+identity)
     send(s,u,callback=button(menu,'Дом'))
     card=send(s,u,callback='fedit:'+identity)
-    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'70');confirm(s,u,card)
+    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'70')
     assert balances(database,u)['Основной']==-70
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(3,)]

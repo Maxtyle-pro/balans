@@ -34,7 +34,7 @@ def test_buttons_income_opening_expense_and_edit(service,database):
     edit=readable(send(s,u,callback=button(expense,'✏️ Изменить')))
     readable(send(s,u,callback=button(edit,'Изменить сумму')))
     preview=readable(send(s,u,'300'))
-    readable(send(s,u,callback=button(preview,'Сохранить изменения')))
+    assert [label for row in preview.buttons for label,_ in row]==['✏️ Изменить']
     assert '1 200,00' in readable(send(s,u,callback='balance')).text
     assert query(database,u,'SELECT count(*) FROM operations')==[(3,)]
 

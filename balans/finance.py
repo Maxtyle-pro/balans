@@ -97,9 +97,17 @@ class Finance(OperationEditor):
         if d['kind']=='transfer' and not d['cancel_operation'] and self._account_currency(c,d['account_id'])!=self._account_currency(c,d['destination_account_id']):buttons.append([('Сумма зачисления',f'ffield:received:{suffix}')])
         return Reply(text,buttons)
 
-    def _finance_text(self,c,d,text):
+    def _finance_text(self,c,d,text,message_id=None):
         field=d['finance_edit_field'] or ('amount' if d['step']=='amount' else None)
+        if d.get('edit_operation_id') and not field and d['step']=='category':
+            category=c.execute('SELECT id FROM categories WHERE NOT archived AND workspace_id=%s AND lower(name)=lower(%s)',(d['workspace_id'],text)).fetchone()
+            if not category:
+                reply=self._category_menu(c,d)
+                reply.text='Категория не найдена.\n'+reply.text
+                return self._editor_reply(d,reply)
+            return self._select_category(c,d,category['id'],message_id)
         if not field:return self._finance_prompt(c,d)
+        if d.get('edit_operation_id'):self._remember_editor_message(c,d,message_id)
         if field=='received':
             if d['kind']!='transfer':raise ValueError('Поле доступно только для перевода.')
             c.execute('UPDATE operation_drafts SET destination_amount=%s WHERE id=%s',(amount_from_text(text),d['id']))
@@ -122,6 +130,9 @@ class Finance(OperationEditor):
         current=self._draft(c)
         if current['kind']=='transfer' and self._account_currency(c,current['account_id'])==self._account_currency(c,current['destination_account_id']):c.execute('UPDATE operation_drafts SET destination_amount=amount WHERE id=%s',(d['id'],))
         c.execute("UPDATE operation_drafts SET step='confirm',finance_edit_field=NULL,version=version+1 WHERE id=%s",(d['id'],))
+        current=self._draft(c)
+        if current.get('edit_operation_id') and not current.get('cancel_operation'):
+            return self._finish_editor_change(c,current,message_id)
         return self._prompt(c,self._draft(c)) if d['automatic_capture'] and not d['edit_operation_id'] else self._finance_prompt(c,self._draft(c))
 
     def _finance_callback(self,c,user,callback,sent,message_id=None):

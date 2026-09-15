@@ -80,7 +80,7 @@ def test_voice_missing_fields_and_edit(voices,database):
     assert query(database,u,'SELECT capture_warnings FROM operation_revisions')==[(['date'],)]
     edit=send(s,u,callback=button(card,'✏️ Изменить'))
     send(s,u,callback=button(edit,'Изменить дату'));edit=send(s,u,'13.09.2026')
-    saved=send(s,u,callback=button(edit,'Сохранить изменения'));check(saved)
+    saved=edit;check(saved)
     assert 'дата сообщения' not in saved.text
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert query(database,u,'SELECT capture_warnings FROM operation_revisions ORDER BY revision_no')==[(['date'],),([],)]

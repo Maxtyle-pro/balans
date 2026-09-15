@@ -118,6 +118,9 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
                     reply=self._quota_card(c,kind) if kind and 'Квота AI исчерпана' in message else Reply(message)
                 except ValueError as exc:
                     reply = Reply(str(exc))
+                    draft = self._draft(c)
+                    if draft and draft.get('edit_operation_id'):
+                        reply.edit_draft_id = str(draft['id'])
                 c.execute('INSERT INTO telegram_updates(bot_id,update_id,user_id,response,workspace_id) VALUES(%s,%s,%s,%s,coalesce(%s,current_workspace()))',
                           (bot_id, update_id, user_id, Jsonb(asdict(reply)),UUID(reply.access_workspace_id) if reply.access_workspace_id else None))
         if reply.text_job_id:return self._resolve_text_job(telegram_id,reply.text_job_id)
@@ -402,7 +405,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             voice_reply=self._voice_text(c,d,text)
             if voice_reply is not None:return voice_reply
         if d['kind']!='expense' or d['edit_operation_id'] or d['finance_edit_field']:
-            return self._finance_text(c,d,text)
+            return self._finance_text(c,d,text,message_id)
         if d['voice_job_id']:
             voice_reply=self._voice_text(c,d,text)
             if voice_reply is not None:
@@ -418,7 +421,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
                 reply = self._prompt(c, d)
                 reply.text = 'Категория не найдена.\n' + reply.text
                 return reply
-            return self._select_category(c,d,category['id'])
+            return self._select_category(c,d,category['id'],message_id)
         elif d['step'] == 'description':
             if not text or len(text)>500:
                 raise ValueError('Описание: от 1 до 500 символов. «-» — пропустить.')
