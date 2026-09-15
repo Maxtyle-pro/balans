@@ -66,7 +66,9 @@ def test_exchange_two_amounts_and_cancellation(service,database):
     assert 'расходы 100,00' not in report
     assert query(database,u,"SELECT destination_amount FROM operation_revisions r JOIN operations o ON o.current_revision_id=r.id WHERE o.kind='transfer'")==[(Decimal('1'),)]
     identity=query(database,u,"SELECT id FROM operations WHERE kind='transfer'")[0][0]
-    edit=send(s,u,callback=f'fedit:{identity}');edit=send(s,u,callback=button(edit,'Сумма зачисления'));edit=send(s,u,'1.1');confirm(s,u,edit)
+    edit=send(s,u,callback=f'fedit:{identity}')
+    _,draft_id,version=button(edit,'Отмена').split(':')
+    edit=send(s,u,callback=f'ffield:received:{draft_id}:{version}');edit=send(s,u,'1.1');confirm(s,u,edit)
     assert sorted(query(database,u,"SELECT currency,sum(delta) FROM postings GROUP BY currency"))==[('RUB',Decimal('0')),('USD',Decimal('1.1'))]
     send(s,u,callback=f'fdelete:{identity}');cancel=send(s,u,'Ошибочная запись');confirm(s,u,cancel)
     assert sorted(query(database,u,"SELECT currency,sum(delta) FROM postings GROUP BY currency"))==[('RUB',Decimal('100')),('USD',Decimal('0'))]

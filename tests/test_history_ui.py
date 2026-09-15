@@ -10,7 +10,7 @@ def test_number_selection_snapshot_restart_and_confirmation(service,database):
     send(s,u,callback=draft(s,u,'100'))
     history=send(s,u,'/history')
     assert '1.' in history.text and '/history' not in history.text
-    token=button(history,'✏️ Изменить расход')
+    token=button(history,'✏️ Изменить операцию')
     send(s,u,callback=draft(s,u,'200'))
     send(s,u,callback=token)
     assert 'номер от 1 до 1' in send(s,u,'9').text
@@ -20,8 +20,10 @@ def test_number_selection_snapshot_restart_and_confirmation(service,database):
     try:card=send(restarted,u,'1')
     finally:restarted.close()
     assert '100,00' in card.text
-    send(s,u,callback=button(card,'Сумма'))
+    assert [label for row in card.buttons for label,_ in row]==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Отмена']
+    send(s,u,callback=button(card,'Изменить сумму'))
     card=send(s,u,'150')
+    assert 'Сохранить изменения' in [label for row in card.buttons for label,_ in row]
     assert query(database,u,'SELECT sum(amount) FROM operation_revisions WHERE revision_no=1')[0][0]==300
     send(s,u,callback=button(card,'Сохранить изменения'))
     assert query(database,u,'SELECT sum(r.amount) FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id')[0][0]==350
@@ -30,9 +32,10 @@ def test_number_selection_snapshot_restart_and_confirmation(service,database):
 def test_back_discards_edit_and_numbers_are_not_implicit(service,database):
     s=service;u=next(USERS);send(s,u,callback=draft(s,u,'100'))
     history=send(s,u,'/history')
-    send(s,u,callback=button(history,'✏️ Изменить расход'))
+    send(s,u,callback=button(history,'✏️ Изменить операцию'))
     card=send(s,u,'1')
-    send(s,u,callback=button(card,'Назад к списку'))
+    assert [label for row in card.buttons for label,_ in row]==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Отмена']
+    send(s,u,callback=button(card,'Отмена'))
     assert query(database,u,"SELECT count(*) FROM operation_drafts WHERE state='pending'")==[(0,)]
     send(s,u,'3')
     assert query(database,u,"SELECT amount,edit_operation_id FROM operation_drafts WHERE state='pending'")==[(3,None)]
@@ -41,8 +44,8 @@ def test_back_discards_edit_and_numbers_are_not_implicit(service,database):
 def test_category_change_waits_for_save(service,database):
     s=service;u=next(USERS);send(s,u,callback=draft(s,u,'100'))
     before=query(database,u,'SELECT r.category_id FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id')
-    history=send(s,u,'/history');send(s,u,callback=button(history,'✏️ Изменить расход'))
-    card=send(s,u,'1');choices=send(s,u,callback=button(card,'Категория'))
+    history=send(s,u,'/history');send(s,u,callback=button(history,'✏️ Изменить операцию'))
+    card=send(s,u,'1');choices=send(s,u,callback=button(card,'Изменить категорию'))
     card=send(s,u,callback=button(choices,'Здоровье'))
     assert query(database,u,'SELECT r.category_id FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id')==before
     send(s,u,callback=button(card,'Сохранить изменения'))

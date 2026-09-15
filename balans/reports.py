@@ -45,9 +45,13 @@ class Reports:
             percent=amount(s['delta_percent'])
             prev_start=date.fromisoformat(s['previous_start']);prev_end=date.fromisoformat(s['previous_end'])
             lines+=['',f"Расходы на {abs(percent)}% {'больше' if percent>=0 else 'меньше'}, чем за {prev_start:%d.%m.%Y} — {prev_end:%d.%m.%Y}."]
+        if s.get('created_at'):
+            created=datetime.fromisoformat(s['created_at']).astimezone(ZoneInfo(s.get('timezone','Europe/Moscow')))
+            lines+=['',f'Снимок на {created:%d.%m.%Y %H:%M}. После изменений обновите отчёт.']
         return Reply('\n'.join(lines),[
             [('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],
             [('🧾 Детализированный отчёт',f'rdetail:{identity}')],
+            [('📑 CSV за период',f'rcsv:{identity}'),('🔄 Обновить',f'rrefresh:{identity}')],
             [('🤖 Анализ расходов',f'rask:{identity}')],
             [('📅 Изменить период','ui:go:report_period')],
             [('☰ Меню','ui:menu')]],command_hints=False)
@@ -115,10 +119,20 @@ class Reports:
             if job['kind']=='sheets':return Reply('Подключение таблиц отключено.',[[('Отчёт','report')]])
             if job['state']=='failed':c.execute("UPDATE report_jobs SET state='pending',reply=NULL,error_code=NULL WHERE id=%s",(job['id'],))
             return Reply('Проверяю задание…',report_job_id=str(job['id']))
-        if action not in ('rdetail','rpdf','rcsv','raudit','rask','ranalyze','rsask','rexport'):return None
+        if action not in ('rrefresh','rdetail','rpdf','rcsv','raudit','rask','ranalyze','rsask','rexport'):return None
         identity,_,connection_token=raw.partition(':')
         report=self._get_report(c,identity)
         if not report:return Reply('Отчёт недоступен или истёк. /report — создать новый.')
+        if action=='rrefresh':
+            s=report['snapshot'];currency='all' if s.get('currency_reports') or s.get('converted') else s.get('currency','RUB')
+            from datetime import date
+            previous_scope=(s.get('requested_period') or '').split('|')
+            all_history=previous_scope[0].strip().lower()=='all' or (date.fromisoformat(s['end'])-date.fromisoformat(s['start'])).days>365
+            scope=('all' if all_history else s['start']+' '+s['end'])+''.join(' | '+part.strip() for part in previous_scope[1:])
+            arg=scope+' | currency='+currency
+            if s.get('converted'):arg+=' | convert='+s['currency']
+            fresh=self._report_snapshot(c,user_id,arg,datetime.now(timezone.utc))
+            return self._report_card(fresh)
         if action in ('rdetail','rpdf','rcsv','raudit'):return Reply('Готовлю файл…',report_id=str(report['id']),report_format={'rdetail':'detailed','rpdf':'pdf','rcsv':'csv','raudit':'auditcsv'}[action])
         if action=='rask':return self._analysis_consent(report)
         if action=='rsask':return self._sheets_consent(c,report)

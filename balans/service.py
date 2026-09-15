@@ -100,7 +100,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
         return Reply(**row['response'])
 
     def _handle_impl(self, telegram_id: int, bot_id: int, update_id: int, text: str,
-               sent_at: datetime, callback: str | None = None) -> Reply:
+               sent_at: datetime, callback: str | None = None, message_id: int | None = None) -> Reply:
         with self._actor_transaction(telegram_id) as c:
             user_id = c.execute('SELECT bootstrap() AS id').fetchone()['id']
             c.execute('SELECT record_activity()')
@@ -111,7 +111,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             else:
                 c.execute("UPDATE operation_drafts SET state='cancelled' WHERE state='pending' AND expires_at<=now()")
                 try:
-                    with c.transaction():reply = self._dispatch(c, user_id, text.strip(), sent_at, callback)
+                    with c.transaction():reply = self._dispatch(c, user_id, text.strip(), sent_at, callback, message_id)
                 except RaiseException as exc:
                     message=exc.diag.message_primary
                     kind=next((k for k in ('text','image','voice','analysis') if f'({k})' in message),None)
@@ -139,6 +139,23 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
 
     def _draft(self, c):
         return c.execute("SELECT * FROM operation_drafts WHERE state='pending' AND author_user_id=actor_user_id()").fetchone()
+
+    def track_edit_message(self, telegram_id, draft_id, message_id):
+        """Remember a bot message belonging to a pending edit flow."""
+        try:
+            draft_id = UUID(str(draft_id))
+            message_id = int(message_id)
+        except (TypeError, ValueError):
+            return
+        with self._actor_transaction(telegram_id) as c:
+            c.execute("""UPDATE operation_drafts
+                        SET edit_message_ids=CASE
+                          WHEN %s=ANY(edit_message_ids) THEN edit_message_ids
+                          ELSE array_append(edit_message_ids,%s)
+                        END
+                        WHERE id=%s AND author_user_id=actor_user_id()
+                          AND state='pending' AND edit_operation_id IS NOT NULL""",
+                      (message_id, message_id, draft_id))
 
     def _prompt(self, c, d):
         captured=self._capture_draft(c,d)
@@ -194,12 +211,14 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
         c.execute('UPDATE operation_drafts SET automatic_capture=%s WHERE id=%s',(flow=='auto' and self._capture_enabled(c),self._draft(c)['id']))
         return self._prompt(c, self._draft(c))
 
-    def _dispatch(self, c, user_id, text, sent_at, callback):
+    def _dispatch(self, c, user_id, text, sent_at, callback, message_id=None):
         simple=self._simple_entry(c,user_id,text,sent_at,callback)
         if simple is not None:return simple
-        ui=self._ui_entry(c,user_id,text,sent_at,callback)
+        ui=self._ui_entry(c,user_id,text,sent_at,callback,message_id)
         if ui is not None:return ui
         if callback:
+            duplicate=self._capture_duplicate_callback(c,callback)
+            if duplicate is not None:return duplicate
             if callback.startswith('incoming:'):
                 _,kind,identity,version=callback.split(':')
                 if kind not in ('income','opening'):return Reply('Тип недоступен.')
@@ -234,7 +253,7 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             input_reply=self._input_callback(c,user_id,callback,sent_at)
             if input_reply is not None:
                 return input_reply
-            finance_reply=self._finance_callback(c,user_id,callback,sent_at)
+            finance_reply=self._finance_callback(c,user_id,callback,sent_at,message_id)
             if finance_reply is not None:
                 return finance_reply
             report_reply=self._report_callback(c,user_id,callback)
@@ -246,13 +265,13 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             receipt_reply=self._receipt_callback(c,user_id,callback)
             if receipt_reply is not None:
                 return receipt_reply
-            category_reply=self._category_callback(c,user_id,callback)
+            category_reply=self._category_callback(c,user_id,callback,message_id)
             if category_reply is not None:
                 return category_reply
             if callback == 'howto':
                 return Reply(QUICK_HELP, [[('Моя подписка','subscription')],[('☰ Меню','ui:menu')],[('Назад','start')]])
             if callback in ('add', 'history', 'report', 'accounts', 'start', 'subscription', 'renewal', 'workspaces'):
-                return self._dispatch(c, user_id, '/' + callback, sent_at, None)
+                return self._dispatch(c, user_id, '/' + callback, sent_at, None, message_id)
             action, _, raw_id = callback.partition(':')
             if action not in ('save', 'edit', 'cancel'):
                 return Reply('Эта кнопка больше не поддерживается. /help')
@@ -267,12 +286,16 @@ class Service(SimpleInterface, TextRecognition, AutomaticCapture, Addons, Comman
             if not d or d['state'] == 'cancelled':
                 return Reply('Черновик недоступен, отменён или истёк. /add — новый расход.')
             if d['version']!=expected_version:
+                if d['edit_operation_id']:
+                    return Reply('Эта форма редактирования уже закрыта или устарела. Операция не изменена.',[[('Открыть историю','history')]])
                 return Reply('Эта карточка устарела. /add — показать текущий расход.')
             if d['state'] == 'saved':
                 return Reply('Этот расход уже сохранён. Повторной записи нет.', MENU)
             if action == 'cancel':
+                edit = bool(d['edit_operation_id'])
+                delete_ids = self._editor_cleanup_ids(d, message_id, include_origin=False) if edit else []
                 c.execute("UPDATE operation_drafts SET state='cancelled' WHERE id=%s", (draft_id,))
-                return Reply('Черновик отменён. Сохранённые расходы не изменились.', MENU)
+                return Reply('Изменение отменено. Операция не изменена.' if edit else 'Черновик отменён. Сохранённые расходы не изменились.', MENU if not edit else [], delete_message_ids=delete_ids)
             if action == 'edit':
                 c.execute("UPDATE operation_drafts SET state='cancelled' WHERE id=%s", (draft_id,))
                 return self._new(c, user_id, sent_at, flow=d['flow'])

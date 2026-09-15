@@ -29,7 +29,9 @@ def test_ninety_days_and_no_delete_without_delivery(private_service,database):
     assert len(notices)==1
     notice,batch=notices[0]
     owner_sql(database,"UPDATE notification_outbox SET state='sending' WHERE id=%s",(notice,))
-    assert s.prepare_notification(u,notice)
+    prepared=s.prepare_notification(u,notice)
+    assert prepared and 'Скачайте архив' in prepared['message']
+    assert 'дополнительную плату' not in prepared['message']
     s.finish_notification(u,notice,'sent')
     assert query(database,u,'SELECT retention_warned_at IS NOT NULL,expires_at>now() FROM documents WHERE id=%s',(doc,))==[(True,True)]
     s.plan_notifications();assert len(query(database,u,"SELECT id FROM notification_outbox WHERE kind='retention'"))==1

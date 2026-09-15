@@ -6,13 +6,13 @@ from balans.domain import Reply, money
 
 class HistoryUI:
     def _history_page(self,c,page):
-        rows=c.execute('SELECT o.id,o.created_by_user_id=actor_user_id() AS editable,o.kind,o.state,r.amount,r.currency,r.description,r.occurred_on,r.capture_warnings,coalesce(cat.name,chr(8212)) AS category FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id LEFT JOIN categories cat ON cat.id=r.category_id ORDER BY o.created_at DESC,o.id DESC LIMIT 6 OFFSET %s',((page-1)*5,)).fetchall()
+        rows=c.execute('SELECT o.id,o.created_by_user_id=actor_user_id() AS editable,o.kind,o.state,r.amount,r.opening_negative,r.currency,r.description,r.occurred_on,r.capture_warnings,coalesce(cat.name,chr(8212)) AS category FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id LEFT JOIN categories cat ON cat.id=r.category_id ORDER BY o.created_at DESC,o.id DESC LIMIT 6 OFFSET %s',((page-1)*5,)).fetchall()
         if not rows:return Reply('На этой странице записей нет.',[[('В начало истории','history'),('Меню','ui:menu')]])
         from balans.finance import KINDS
-        lines=[f"{i}. {r['description'] or KINDS[r['kind']]} — {money(r['amount'],r['currency'])}\n{r['occurred_on']:%d.%m.%Y} · {r['category']}"+(' · Отменена' if r['state']=='cancelled' else '') for i,r in enumerate(rows[:5],1)]
+        lines=[f"{i}. {r['description'] or KINDS[r['kind']]} — {money(-r['amount'] if r['kind']=='opening' and r['opening_negative'] else r['amount'],r['currency'])}\n{KINDS[r['kind']]} · {r['occurred_on']:%d.%m.%Y} · {r['category']}"+(' · Отменена' if r['state']=='cancelled' else '') for i,r in enumerate(rows[:5],1)]
         lines=[('⚠️ ' if r['capture_warnings'] or r['category']=='Без категории' else '')+line for line,r in zip(lines,rows[:5])]
         token=c.execute("INSERT INTO fund_confirmations(workspace_id,author_user_id,payload) VALUES(current_workspace(),actor_user_id(),%s) RETURNING id",(Jsonb({'action':'history_select','page':page,'ids':[str(r['id']) for r in rows[:5]]}),)).fetchone()['id']
-        buttons=[[('✏️ Изменить расход',f'hselect:{token}')]]
+        buttons=[[('✏️ Изменить операцию',f'hselect:{token}')],[('🔎 Найти','ui:go:search')]]
         nav=[]
         if page>1:nav.append(('← Назад',f'ui:go:history:{page-1}'))
         if len(rows)>5:nav.append(('Далее →',f'ui:go:history:{page+1}'))
@@ -20,14 +20,14 @@ class HistoryUI:
         buttons.append([('Меню','ui:menu')])
         return Reply(f'📋 Ваши операции · страница {page}\n\n'+'\n\n'.join(lines),buttons,command_hints=False)
 
-    def _history_entry(self,c,user,text,sent,callback):
+    def _history_entry(self,c,user,text,sent,callback,message_id=None):
         if callback and callback.startswith('hselect:'):
-            if self._workspace_busy(c) or self._input_batch(c):return Reply('Сначала завершите текущий ввод.',[[('Продолжить','ui:resume')]])
+            if self._workspace_busy(c) or self._input_batch(c):return Reply('Сначала завершите текущий ввод.',[[('Открыть текущий ввод','ui:resume')]])
             token=UUID(callback.split(':')[1])
             row=c.execute("SELECT payload FROM fund_confirmations WHERE id=%s AND author_user_id=%s AND workspace_id=current_workspace() AND expires_at>now()",(token,user)).fetchone()
             if not row or row['payload'].get('action')!='history_select':return Reply('Этот список устарел. Откройте историю заново.',[[('История','history')]])
             c.execute("INSERT INTO ui_inputs(user_id,workspace_id,action) VALUES(%s,current_workspace(),%s) ON CONFLICT(user_id) DO UPDATE SET action=excluded.action,workspace_id=excluded.workspace_id,expires_at=now()+interval '30 minutes',id=gen_random_uuid()",(user,'history:'+str(token)))
-            return Reply(f"Какой расход хотите изменить? Напишите номер из списка выше — от 1 до {len(row['payload']['ids'])}.",[[('Назад к списку',f"ui:go:history:{row['payload']['page']}")]])
+            return Reply(f"Какую операцию хотите изменить? Напишите номер из списка выше — от 1 до {len(row['payload']['ids'])}.",[[('Назад к списку',f"ui:go:history:{row['payload']['page']}")]])
         if callback or text.startswith('/'):return None
         pending=c.execute("SELECT * FROM ui_inputs WHERE user_id=%s AND action LIKE 'history:%%'",(user,)).fetchone()
         if not pending:return None

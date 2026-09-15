@@ -88,9 +88,9 @@ def test_receipt_to_postings_and_original(receipts,database,data,kind):
     assert len(ai.calls)==1
     assert len(list(storage.root.glob('*.bin')))==1
     history=send(s,user,'/history')
-    send(s,user,callback=button(history,'✏️ Изменить расход'))
+    send(s,user,callback=button(history,'✏️ Изменить операцию'))
     selected=send(s,user,'1')
-    assert button(selected,'Чек')
+    assert [label for row in selected.buttons for label,_ in row]==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Отмена']
 
 
 def test_enabled_by_default_and_input_gate(receipts,database):

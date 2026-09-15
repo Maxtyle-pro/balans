@@ -21,6 +21,10 @@ def attach(s,u,identity,data=None):
     assert s.receipt_preflight(u,42,next(UPDATES)) is None
     return s.receive_receipt(u,42,next(UPDATES),datetime.now(timezone.utc),'file-upload',data or photo_bytes())
 
+def edit_save(reply):
+    """Call the legacy save callback without requiring a hidden initial button."""
+    return button(reply,'Отмена').replace('cancel:','fsave:')
+
 def test_attach_without_ai_or_new_expense(service,database):
     s=service;u=next(USERS);identity=op(s,u,database)
     reply=attach(s,u,identity,pdf_bytes())
@@ -61,18 +65,22 @@ def test_required_document_correction_and_closed_period(service,database):
     assert query(database,owner,'SELECT sum(delta) FROM postings')[0][0]==-100
     send(s,owner,f'/review {identity} | accept | Чек потерян, исключение согласовано')
     edit=send(s,user,callback='fedit:'+identity)
-    assert 'Сначала запросите' in send(s,user,callback=button(edit,'Сохранить изменения')).text
+    assert 'Сохранить изменения' not in [label for row in edit.buttons for label,_ in row]
+    edit=send(s,user,callback=button(edit,'Изменить описание'));edit=send(s,user,'Проверка документа')
+    assert 'Сначала запросите' in send(s,user,callback=edit_save(edit)).text
     send(s,user,f'/correction {identity} | Уточнить дату')
     send(s,owner,f'/review {identity} | approve_correction | Разрешено')
-    send(s,user,callback=button(edit,'Сохранить изменения'))
+    send(s,user,callback=edit_save(edit))
     assert query(database,owner,'SELECT status FROM document_sets WHERE id=%s',(UUID(identity),))==[('unreviewed',)]
     today=datetime.now().strftime('%d.%m.%Y')
     send(s,owner,f'/periodclose {today} | {today} | Сверено')
     edit=send(s,user,callback='fedit:'+identity)
-    assert 'Период закрыт' in send(s,user,callback=button(edit,'Сохранить изменения')).text
+    assert 'Сохранить изменения' not in [label for row in edit.buttons for label,_ in row]
+    edit=send(s,user,callback=button(edit,'Изменить описание'));edit=send(s,user,'Исправление периода')
+    assert 'Период закрыт' in send(s,user,callback=edit_save(edit)).text
     assert 'Период закрыт' in send(s,user,'/attach operation '+identity).text
     send(s,owner,f'/periodopen {today} | {today} | Исправление')
-    assert 'сохранена' in send(s,user,callback=button(edit,'Сохранить изменения')).text
+    assert 'записан' in send(s,user,callback=edit_save(edit)).text
 
 
 def test_delete_requires_manager_and_removes_original(service,database):
@@ -130,7 +138,9 @@ def test_new_attachment_does_not_unlock_accepted_amount(service,database):
     send(s,owner,f'/review {identity} | accept')
     attach(s,user,identity)
     edit=send(s,user,callback='fedit:'+identity)
-    assert 'Сначала запросите' in send(s,user,callback=button(edit,'Сохранить изменения')).text
+    assert 'Сохранить изменения' not in [label for row in edit.buttons for label,_ in row]
+    edit=send(s,user,callback=button(edit,'Изменить описание'));edit=send(s,user,'Новый документ')
+    assert 'Сначала запросите' in send(s,user,callback=edit_save(edit)).text
 
 
 def test_long_pdf_attachment_and_cached_download_reauthorization(service,database):

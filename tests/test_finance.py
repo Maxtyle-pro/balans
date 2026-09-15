@@ -60,16 +60,20 @@ def test_refund_partial_limits_and_cancel(service,database):
 def test_revision_and_stale_callbacks(service,database):
     s=service;u=next(USERS);send(s,u,callback=draft(s,u,'100'))
     identity=operation(database,u,'expense');card=send(s,u,callback='fedit:'+identity)
-    stale=button(card,'Сохранить изменения')
-    send(s,u,callback=button(card,'Сумма'));card=send(s,u,'150')
-    assert 'устарела' in send(s,u,callback=stale).text
+    assert 'Сохранить изменения' not in [label for row in card.buttons for label,_ in row]
+    stale=button(card,'Отмена').replace('cancel:','fsave:')
+    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'150')
+    stale_reply=send(s,u,callback=stale)
+    assert 'устарела' in stale_reply.text
+    assert not any(label=='Продолжить' for row in stale_reply.buttons for label,_ in row)
+    assert button(stale_reply,'Открыть историю')=='history'
     saved=button(card,'Сохранить изменения')
     with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(lambda _:send(s,u,callback=saved),range(2)))
     assert balances(database,u)['Основной']==-150
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(2,)]
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
     assert '150,00' in send(s,u,'/report').text
-    card=send(s,u,callback='fedit:'+identity);send(s,u,callback=button(card,'Дата'));card=send(s,u,'вчера');confirm(s,u,card)
+    card=send(s,u,callback='fedit:'+identity);send(s,u,callback=button(card,'Изменить дату'));card=send(s,u,'вчера');confirm(s,u,card)
     assert balances(database,u)['Основной']==-150
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(3,)]
 
@@ -78,7 +82,7 @@ def test_transfer_edit_reverses_both_sides(service,database):
     s=service;u=next(USERS);send(s,u,'/account Наличные')
     confirm(s,u,send(s,u,'/transfer 500 | Наличные'))
     card=send(s,u,callback='fedit:'+operation(database,u,'transfer'))
-    send(s,u,callback=button(card,'Сумма'));card=send(s,u,'200');confirm(s,u,card)
+    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'200');confirm(s,u,card)
     assert balances(database,u)=={'Основной':Decimal(-200),'Наличные':Decimal(200)}
 
 
@@ -87,7 +91,9 @@ def test_private_operations_and_opening_once(service,database):
     confirm(s,u,send(s,u,'/opening -100'))
     identity=operation(database,u,'opening')
     assert 'недоступна' in send(s,other,callback='fedit:'+identity).text
-    assert 'уже задан' in confirm(s,u,send(s,u,'/opening 500')).text
+    reopened=send(s,u,'/opening 500')
+    assert 'уже задан' in reopened.text
+    assert 'Сохранить изменения' not in [label for row in reopened.buttons for label,_ in row]
     assert balances(database,u)['Основной']==-100
     assert query(database,other,'SELECT * FROM postings')==[]
 
@@ -98,6 +104,6 @@ def test_changed_category_keeps_financial_correction_valid(service,database):
     menu=send(s,u,callback='opcat:'+identity)
     send(s,u,callback=button(menu,'Дом'))
     card=send(s,u,callback='fedit:'+identity)
-    send(s,u,callback=button(card,'Сумма'));card=send(s,u,'70');confirm(s,u,card)
+    send(s,u,callback=button(card,'Изменить сумму'));card=send(s,u,'70');confirm(s,u,card)
     assert balances(database,u)['Основной']==-70
     assert query(database,u,'SELECT count(*) FROM operation_revisions')==[(3,)]

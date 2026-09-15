@@ -117,7 +117,7 @@ def test_monthly_timezone_year_boundary():
     assert monthly_slot(now+timedelta(hours=1),'Europe/Moscow',9*60)==datetime(2027,1,1,6,tzinfo=timezone.utc)
 
 
-def test_monthly_report_dedup_and_always_enabled(service,database):
+def test_monthly_report_dedup_and_explicit_disable(service,database):
     s=service;u=next(USERS)
     send(s,u,'/start')
     assert not query(database,u,'SELECT id FROM notification_preferences')
@@ -134,7 +134,7 @@ def test_monthly_report_dedup_and_always_enabled(service,database):
     assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3))
     assert 'Расходы —' in send(s,u,callback=f"nopen:{notice['id']}").text
     send(s,u,callback='monthlyoff')
-    assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3)) is not None
+    assert s.prepare_notification(u,notice['id'],now+timedelta(minutes=3)) is None
     assert query(database,u,"SELECT count(*) FROM report_jobs WHERE kind='analysis'")==[(0,)]
 
 

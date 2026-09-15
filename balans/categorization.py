@@ -133,7 +133,7 @@ class Categorization:
             return self._learning_offer(c,feedback,reply)
         return reply
 
-    def _category_callback(self, c, user_id, callback):
+    def _category_callback(self, c, user_id, callback, message_id=None):
         if callback in ('ai_on','ai_off'):
             return self._category_command(c,user_id,'/ai','on' if callback=='ai_on' else 'off')
         action,_,args=callback.partition(':')
@@ -146,6 +146,7 @@ class Categorization:
             d=self._draft(c)
             if not d or d['id']!=draft_id or d['version']!=version:
                 return Reply('Эта карточка устарела. /add — показать текущий расход.')
+            if d.get('edit_operation_id'):self._remember_editor_message(c,d,message_id)
             if action=='accept':
                 if d['step']!='category_review':
                     return Reply('Эта кнопка уже использована.')

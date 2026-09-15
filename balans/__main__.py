@@ -44,6 +44,13 @@ async def process_update(bot, service, update):
         await deliver_reply(bot,message.chat.id,reply,service)
         return
     # Plain text: names/descriptions are never interpreted as Telegram HTML/Markdown.
+    gate=await asyncio.to_thread(service.personal_navigation_gate,sender.id,message.text or '',query.data if query else None)
+    if gate:
+        if query:
+            try:await bot.answer_callback_query(query.id)
+            except TelegramBadRequest:pass
+        await deliver_reply(bot,message.chat.id,gate,service)
+        return
     if not query and message.text is None:
         if await asyncio.to_thread(service.awaiting_contact,sender.id):
             await deliver_reply(bot,message.chat.id,Reply('Напишите обращение текстом — так я смогу передать его разработчику.',[[('Отмена','ui:menu')]]),service)
@@ -64,7 +71,7 @@ async def process_update(bot, service, update):
             pass  # An expired callback can still have an idempotently processed save.
     reply = await asyncio.to_thread(service.handle, sender.id, bot.id, update.update_id,
                                    message.text or '', datetime.now(timezone.utc) if query else message.date,
-                                   query.data if query else None)
+                                   query.data if query else None, message.message_id)
     await deliver_reply(bot,message.chat.id,reply,service)
 
 
@@ -92,7 +99,15 @@ async def deliver_reply(bot,chat_id,reply,service=None):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data=data) for label, data in row]
         for row in reply.buttons]) if reply.buttons else None
-    if reply.text:await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
+    for message_id in dict.fromkeys(reply.delete_message_ids):
+        try:
+            await bot.delete_message(chat_id,message_id)
+        except (TelegramBadRequest,TelegramForbiddenError):
+            pass
+    if reply.text:
+        sent=await bot.send_message(chat_id,reply.text,reply_markup=keyboard,parse_mode=reply.parse_mode)
+        if reply.edit_draft_id and service and sent and getattr(sent,'message_id',None):
+            await asyncio.to_thread(service.track_edit_message,chat_id,reply.edit_draft_id,sent.message_id)
     for extra in reply.additional_replies:
         await deliver_reply(bot,chat_id,Reply(**extra),service)
     for part in reply.messages:

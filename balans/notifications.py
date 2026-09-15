@@ -136,6 +136,11 @@ class Notifications:
             allowed=next_allowed(now,p['quiet_start'],p['quiet_end'],zone) if p else now
             if allowed>now:
                 c.execute("UPDATE notification_outbox SET state='pending',next_attempt_at=%s WHERE id=%s",(allowed,identity));return None
+            if n['kind']=='quota':
+                n['addons_available']=self._addons_available(c)
+                if not n['addons_available']:n['message']=n['message'].replace('Можно добавить пакет или выбрать расширенный тариф. ','')
+            if n['kind']=='retention':
+                n['message']=n['message'].replace('Можно продлить хранение на 90 дней за дополнительную плату или скачать архив.','Скачайте архив до удаления.')
             return n
 
     def finish_notification(self,actor,identity,state,retry_at=None):
@@ -193,8 +198,10 @@ async def notification_loop(bot,service):
                 n=await asyncio.to_thread(service.prepare_notification,actor,identity)
                 if not n:continue
                 try:
-                    if n['kind']=='quota':
+                    if n['kind']=='quota' and n.get('addons_available'):
                         markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Добавить пакет',callback_data=f"nquota:{identity}:{n['entity_kind']}")],[InlineKeyboardButton(text='Выбрать тариф',callback_data=f'nquota:{identity}:upgrade')],[InlineKeyboardButton(text='Ввести вручную',callback_data='ui:go:manual')]])
+                    elif n['kind']=='quota':
+                        markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Моя подписка',callback_data='subscription')],[InlineKeyboardButton(text='Ввести вручную',callback_data='ui:go:manual')]])
                     else:markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть',callback_data=f'nopen:{identity}')],[InlineKeyboardButton(text='⚙️ Уведомления',callback_data='ui:go:notify'),InlineKeyboardButton(text='☰ Все действия',callback_data='ui:menu')]])
                     await bot.send_message(actor,n['message'],reply_markup=markup)
                 except TelegramForbiddenError:

@@ -113,7 +113,7 @@ def present_reply(reply):
     if not reply.command_hints:return reply
     if 'Квота AI исчерпана' in reply.text:
         kind=next((k for k in ('text','image','voice','analysis') if f'({k})' in reply.text),'image')
-        return replace(reply,text='🤖 Лимит ИИ исчерпан. Можно добавить пакет или выбрать расширенный тариф. Ручной ввод остаётся доступен.',buttons=[[('Добавить пакет','addon:'+kind)],[('Выбрать тариф','addon:upgrade')],[('Ввести вручную','ui:go:manual')]])
+        return replace(reply,text='🤖 Лимит ИИ исчерпан. Срок обновления квот указан в подписке. Ручной ввод остаётся доступен.',buttons=[[('Моя подписка','subscription')],[('Ввести вручную','ui:go:manual')]])
     found=[]; replacements=[]; consumed=0
     for match in COMMAND_PATTERN.finditer(reply.text):
         if match.start()<consumed:continue
@@ -171,8 +171,8 @@ class CommandUI(HistoryUI):
         if receipt:return self._receipt_command(c,user,'/receipts','')
         return self._ui_menu(c)
 
-    def _ui_entry(self,c,user,text,sent,callback):
-        history=self._history_entry(c,user,text,sent,callback)
+    def _ui_entry(self,c,user,text,sent,callback,message_id=None):
+        history=self._history_entry(c,user,text,sent,callback,message_id)
         if history is not None:return history
         if callback and callback.startswith('ui:inputcancel:'):
             c.execute('DELETE FROM ui_inputs WHERE user_id=%s AND id=%s',(user,UUID(callback.split(':')[-1])))
@@ -191,7 +191,7 @@ class CommandUI(HistoryUI):
             item=ACTIONS[key]
             if item.prompt:
                 if self._workspace_busy(c) or self._input_batch(c):
-                    return Reply('Сначала завершите текущий ввод или отмените его.',[[('Продолжить','ui:resume'),('Отменить ввод','ui:go:cancel')]])
+                    return Reply('Сначала завершите текущий ввод или отмените его.',[[('Открыть текущий ввод','ui:resume'),('Отменить ввод','ui:go:cancel')]])
                 row=c.execute("INSERT INTO ui_inputs(user_id,workspace_id,action) VALUES(%s,current_workspace(),%s) RETURNING id",(user,key)).fetchone()
                 return Reply(item.label+'\n\n'+item.prompt,[[('Отмена',f"ui:inputcancel:{row['id']}")]])
             reply=self._dispatch(c,user,item.command,sent,None)

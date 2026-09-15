@@ -37,6 +37,8 @@ class Reply:
     capture_batch_id: str | None = None
     capture_draft_id: str | None = None
     additional_replies: list[dict] = field(default_factory=list)
+    delete_message_ids: list[int] = field(default_factory=list)
+    edit_draft_id: str | None = None
 
 
 def amount_from_text(value: str) -> Decimal:

@@ -198,8 +198,8 @@ def test_pdf_contains_every_operation_and_income():
     assert '100 000,00' in text and 'Начальный остаток' in text
 
 
-def test_simple_report_has_five_actions(reporting):
+def test_simple_report_has_export_and_refresh_actions(reporting):
     s,_,_=reporting;u=next(USERS)
     card=send(s,u,'/report')
-    assert [label for row in card.buttons for label,_ in row]==['📄 Скачать PDF-отчёт','🧾 Детализированный отчёт','🤖 Анализ расходов','📅 Изменить период','☰ Меню']
+    assert [label for row in card.buttons for label,_ in row]==['📄 Скачать PDF-отчёт','🧾 Детализированный отчёт','📑 CSV за период','🔄 Обновить','🤖 Анализ расходов','📅 Изменить период','☰ Меню']
     assert 'Europe/Moscow' not in card.text and 'Валюта:' not in card.text

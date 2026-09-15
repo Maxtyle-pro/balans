@@ -8,6 +8,8 @@ from balans.report_data import summarize,amount
 
 class CurrencyFlow:
     def _currency_picker(self,c):
+        if c.execute("SELECT 1 FROM operations o JOIN workspaces w ON w.id=o.workspace_id WHERE w.kind='personal' AND w.owner_user_id=actor_user_id() LIMIT 1").fetchone():
+            return Reply('💱 Валюта учёта: '+self._account_context(c)['currency']+'.\n\nВ истории уже есть операции. Изменение валюты недоступно: существующие суммы не пересчитываются автоматически.',[[('← Настройки','ui:go:settings')]])
         return Reply('💱 Выберите валюту учёта\nОна будет использоваться для новых расходов, доходов и чеков. Повторно указывать её не нужно.',[[('₽ Рубли','usercurrency:RUB')],[('$ Доллары','usercurrency:USD')],[('€ Евро','usercurrency:EUR')]])
 
     def _user_currency_callback(self,c,callback):
@@ -106,7 +108,12 @@ class CurrencyFlow:
         for child in s['currency_reports']:
             q=child['summary'];currency=child['currency']
             lines.append(f"{currency}: расходы {money(Decimal(q['total']),currency)}, возвраты {money(Decimal(q['refunds']),currency)}, чистые расходы {money(Decimal(q['net_expenses']),currency)}, доходы {money(Decimal(q['income']),currency)}")
-        identity=report['id'];return Reply('\n'.join(lines)+'\nОбщий итог разных валют не вычисляется.',[[('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],[('🧾 Детализированный отчёт',f'rdetail:{identity}')],[('🤖 Анализ расходов',f'rask:{identity}')],[('📅 Изменить период','ui:go:report_period')],[('☰ Меню','ui:menu')]])
+        if s.get('created_at'):
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            created=datetime.fromisoformat(s['created_at']).astimezone(ZoneInfo(s.get('timezone','Europe/Moscow')))
+            lines.append(f'Снимок на {created:%d.%m.%Y %H:%M}. После изменений обновите отчёт.')
+        identity=report['id'];return Reply('\n'.join(lines)+'\nОбщий итог разных валют не вычисляется.',[[('📄 Скачать PDF-отчёт',f'rpdf:{identity}')],[('🧾 Детализированный отчёт',f'rdetail:{identity}')],[('📑 CSV за период',f'rcsv:{identity}'),('🔄 Обновить',f'rrefresh:{identity}')],[('🤖 Анализ расходов',f'rask:{identity}')],[('📅 Изменить период','ui:go:report_period')],[('☰ Меню','ui:menu')]])
 
     def _analysis_consent(self,report):
         if report['snapshot'].get('currency_reports'):return Reply('Для AI-анализа выберите одну валюту: /analyze месяц | currency=USD. Суммы разных валют не объединяются.')

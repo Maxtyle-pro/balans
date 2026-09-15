@@ -47,6 +47,7 @@ class SharedReports:
         summary=summarize(current,start,end);past=summarize(previous,previous_start,previous_end);delta=amount(summary['total'])-amount(past['total'])
         workspace=c.execute('SELECT * FROM workspaces WHERE id=current_workspace()').fetchone()
         snapshot={'start':str(start),'end':str(end),'previous_start':str(previous_start),'previous_end':str(previous_end),'timezone':zone,'workspace':workspace['name'],'workspace_kind':workspace['kind'],'filter_member':member,'created_at':datetime.now(timezone.utc).isoformat(),'rows':current,'previous_rows':previous,'currency':c.execute("SELECT coalesce(nullif(current_setting('balans.report_currency',true),''),'RUB') AS c").fetchone()['c'],'summary':summary,'previous':past,'delta':str(delta),'delta_percent':str((delta*100/amount(past['total'])).quantize(Decimal('.1'),rounding=ROUND_HALF_UP)) if amount(past['total']) else None}
+        snapshot['requested_period']=arg
         if workspace['kind']=='shared' and snapshot['currency']==workspace['base_currency']:snapshot['funds']=self._shared_funds_snapshot(c,start,end,member)
         return c.execute('INSERT INTO reports(workspace_id,author_user_id,snapshot) VALUES(%s,%s,%s) RETURNING *',(workspace['id'],user_id,Jsonb(snapshot))).fetchone()
 

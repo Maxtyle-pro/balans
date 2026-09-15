@@ -14,6 +14,33 @@ HIDDEN_ACTIONS={'sheets','sheets_connect','sheets_off','account','accounts','tra
 TIMEZONES={'Europe/Moscow':'Москва · UTC+3','Europe/London':'Лондон','Europe/Paris':'Париж','Asia/Dubai':'Дубай · UTC+4','Asia/Yekaterinburg':'Екатеринбург · UTC+5','Asia/Novosibirsk':'Новосибирск · UTC+7','Asia/Vladivostok':'Владивосток · UTC+10','America/New_York':'Нью-Йорк','UTC':'UTC'}
 
 class SimpleInterface(CategorySettings):
+    def personal_navigation_gate(self,actor,text='',callback=None):
+        """Public Telegram boundary; legacy modules remain available internally."""
+        with self._actor_transaction(actor) as c:
+            if blocked:=self._privacy_blocked(c):return blocked
+            c.execute('SELECT bootstrap()')
+            current=c.execute('SELECT kind FROM workspaces WHERE id=current_workspace()').fetchone()
+            if callback=='personalbudget':
+                if self._workspace_busy(c):
+                    return Reply('Сначала отмените незавершённый ввод. Сохранённые операции останутся на месте.',[[('Отменить ввод','ui:go:cancel')],[('Вернуться в личный бюджет','personalbudget')]])
+                c.execute("UPDATE user_settings SET selected_workspace_id=(SELECT id FROM workspaces WHERE kind='personal' AND owner_user_id=actor_user_id()),default_account_id=NULL WHERE user_id=actor_user_id()")
+                c.execute('DELETE FROM ui_inputs WHERE user_id=actor_user_id()')
+                return self._ui_menu(c)
+            command=text.strip().split(maxsplit=1)[0].split('@')[0].lower().removeprefix('/') if text.strip().startswith('/') else ''
+            if current and current['kind']!='personal':
+                if command=='cancel' or callback=='ui:go:cancel':return None
+                return Reply('Выбран прежний общий бюджет. Текущий интерфейс работает с личным балансом. Перейдите в личный бюджет; прежняя история сохранится.',[[('Вернуться в личный бюджет','personalbudget')],[('Отменить текущий ввод','ui:go:cancel')]])
+            action=(callback or '').split(':')[0]
+            if action in ('nopen','nquota'):
+                from uuid import UUID
+                try:identity=UUID(callback.split(':')[1])
+                except ValueError:return Reply('Уведомление недоступно.',MAIN_BUTTONS)
+                notice=c.execute("SELECT 1 FROM notification_outbox n JOIN workspaces w ON w.id=n.workspace_id WHERE n.id=%s AND w.kind='shared'",(identity,)).fetchone()
+                if notice:return Reply('Это уведомление из прежнего общего бюджета. Личный баланс не переключён; прежние данные сохранены.',MAIN_BUTTONS)
+            if command in HIDDEN_ACTIONS or action in ('wsuse','wsjoin','wsapprove','wsreject','wsremove','wsremoveok','wsrevoke','acuse'):
+                return Reply('В этой версии доступны личные доходы, расходы и один баланс. Старые разделы не открываются; сохранённые данные не удалены.',MAIN_BUTTONS)
+        return None
+
     def _ui_menu(self,c,section=''):
         if section in ('preferences','privacy'):return self._simple_settings(c)
         return Reply('💰 Баланс\n\nОтправьте текст, голосовое, фото или документ — я помогу записать операцию.\nИли выберите действие:',MAIN_BUTTONS)
@@ -24,6 +51,7 @@ class SimpleInterface(CategorySettings):
             [('💱 Валюта','currencysettings'),('🕒 Часовой пояс','ui:go:settings_zone')],
             [('💰 Начальный остаток','ui:go:opening')],
             [('🏷 Категории','ui:go:categories')],
+            [('🔒 Данные и приватность','ui:go:privacy')],
             [('🗑 Очистить историю','historyclear')],
             [('Сохранение: '+('автоматически' if self._capture_enabled(c) else 'с подтверждением'),'captureoff' if self._capture_enabled(c) else 'captureon')],
             [('← Главное меню','ui:menu')]])
@@ -34,6 +62,8 @@ class SimpleInterface(CategorySettings):
         return Reply(text+'\n\nПо внесённым доходам, расходам и начальному остатку.',[[('➕ Доход','ui:go:income'),('➖ Расход','add')],[('Начальный остаток','ui:go:opening')],[('← Главное меню','ui:menu')]],command_hints=False)
 
     def _simple_entry(self,c,user,text,sent,callback):
+        if callback in ('ui:go:privacy','ui:go:ai','ui:go:voice','ui:go:receipts','ui:go:notify','monthlysettings'):
+            c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
         category=self._category_settings_entry(c,user,text,callback)
         if category is not None:return category
         if callback=='historyclear':
@@ -44,10 +74,16 @@ class SimpleInterface(CategorySettings):
             c.execute('SELECT clear_personal_history(%s)',(UUID(callback.split(':')[1]),))
             return Reply('✅ История очищена. Баланс обнулён. Загруженные файлы поставлены на удаление.\nМожно записывать новые операции.',MAIN_BUTTONS)
         command=text.split(maxsplit=1)[0].split('@')[0].lower() if text.strip() else ''
-        if command=='/notify' or callback and (callback in ('monthlysettings','monthlyon','monthlyoff','ui:go:notify') or callback.startswith('ui:go:notify_')):
-            return Reply('🔔 Ежемесячный отчёт, предупреждения о лимите ИИ и сроке хранения файлов приходят автоматически.',[[('☰ Меню','ui:menu')]])
-        if (command=='/ai' and not text.split()[1:]) or (command in ('/voice','/receipts') and text.split()[1:]==['off']) or callback and (callback=='ui:section:recognition' or callback in ('ui:go:ai','ui:go:voice','ui:go:receipts','ai_off') or callback in ('ui:go:ai_off','ui:go:voice_off','ui:go:receipts_off')):
-            return Reply('Отправьте текст, голосовое, фото или документ — распознавание работает автоматически.',[[('☰ Меню','ui:menu')]])
+        if (command=='/notify' and not text.split()[1:]) or callback in ('ui:go:notify','monthlysettings'):
+            p=self._preference(c)
+            return Reply('🔔 Уведомления\n\nЕжемесячный отчёт: '+('включён' if p['enabled'] and p['monthly'] else 'выключен')+'.\nСлужебные сообщения о квотах и сроках хранения файлов приходят отдельно.',[[('Выключить отчёт' if p['enabled'] and p['monthly'] else 'Включить отчёт','monthlyoff' if p['enabled'] and p['monthly'] else 'monthlyon')],[('← Данные и приватность','ui:go:privacy')]])
+        if (command=='/ai' and not text.split()[1:]) or callback in ('ui:go:ai','ui:go:voice','ui:go:receipts'):
+            channel=callback[6:] if callback else 'ai'
+            column={'ai':'ai_enabled','voice':'voice_enabled','receipts':'receipts_enabled'}[channel]
+            enabled=c.execute('SELECT '+column+' AS enabled FROM user_settings WHERE user_id=actor_user_id()').fetchone()['enabled']
+            title={'ai':'Распознавание текста','voice':'Голосовой ввод','receipts':'Фото, чеки и PDF'}[channel]
+            return Reply(title+': '+('включено' if enabled else 'выключено')+'.\nПри включении отправленные данные обрабатываются в OpenAI.',[[('Выключить' if enabled else 'Включить','ui:go:'+channel+('_off' if enabled else '_on'))],[('← Распознавание','ui:section:recognition')]])
+        if callback=='ai_off':return self._dispatch(c,user,'/ai off',sent,None)
         if callback=='ui:go:settings_zone':
             c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
             return Reply('🕒 Выберите часовой пояс по городу:',[[(label,'tz:'+zone)] for zone,label in TIMEZONES.items()]+[[('← Настройки','ui:go:settings')]])
@@ -72,7 +108,10 @@ class SimpleInterface(CategorySettings):
         if handled:c.execute('DELETE FROM ui_inputs WHERE user_id=%s',(user,))
         if callback=='workspaces':return self._ui_menu(c)
         if callback=='ui:go:privacy':
-            return Reply('🔒 Приватность\n\nВаши личные записи доступны только вам. Для распознавания сообщения и файлы передаются в OpenAI. Голосовые файлы не сохраняются. Фото и документы хранятся 90 дней; перед удалением предложим продление. Продление оплачивается только после вашего согласия.',[[('📎 Мои файлы','ui:go:files')],[('Удалить мои данные','ui:go:delete')],[('Поддержка','ui:go:support')],[('← Настройки','ui:go:settings')]])
+            policy=c.execute('SELECT privacy_url,terms_url FROM privacy_policy').fetchone()
+            links='\nПолитика: '+policy['privacy_url'] if policy['privacy_url'] else ''
+            if policy['terms_url']:links+='\nУсловия: '+policy['terms_url']
+            return Reply('🔒 Данные и приватность\n\nДля распознавания сообщения и файлы передаются в OpenAI. Голосовые файлы не сохраняются. Базовый срок хранения фото и документов — 90 дней; перед удалением предложим скачать архив.'+links,[[('🤖 Распознавание','ui:section:recognition')],[('🔔 Уведомления','ui:go:notify')],[('📎 Мои файлы','ui:go:files')],[('Удалить профиль','ui:go:delete')],[('← Настройки','ui:go:settings')]])
         if callback=='ui:section:recognition':
             return Reply('🤖 Распознавание\nВыберите, что настроить:',[[('Текст','ui:go:ai'),('Голос','ui:go:voice'),('Фото и документы','ui:go:receipts')],[('← Настройки','ui:go:settings')]])
         if callback in ('balance','accounts','ui:go:accounts'):return self._balance_card(c)

@@ -73,7 +73,7 @@ class Billing(BillingDemo, Onboarding):
             rows=[demo] if demo['paid_at'] else []
             buttons.append([('Тестовый пульт','demopanel')])
         if rows:buttons.append([('Управлять продлением','renewal')])
-        if access['status'] in ('trial','active'):
+        if access['status'] in ('trial','active') and self._addons_available(c):
             buttons.append([('Дополнительные пакеты','addonmenu'),('Расширенный тариф','addon:upgrade')])
         buttons.append([('Ежемесячный отчёт','monthlysettings'),('Назад','start')])
         return Reply(text,buttons)

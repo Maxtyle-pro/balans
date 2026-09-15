@@ -32,7 +32,7 @@ def test_buttons_income_opening_expense_and_edit(service,database):
     expense=readable(send(s,u,'Вода 339'))
     assert 'Расход записан' in expense.text
     edit=readable(send(s,u,callback=button(expense,'✏️ Изменить')))
-    readable(send(s,u,callback=button(edit,'Сумма')))
+    readable(send(s,u,callback=button(edit,'Изменить сумму')))
     preview=readable(send(s,u,'300'))
     readable(send(s,u,callback=button(preview,'Сохранить изменения')))
     assert '1 200,00' in readable(send(s,u,callback='balance')).text
@@ -69,16 +69,21 @@ def test_addressed_sheets_command_cannot_connect(service,database):
     assert query(database,u,'SELECT count(*) FROM sheets_connections')==[(0,)]
 
 
-def test_automatic_features_have_no_settings_switches(service):
+def test_automatic_features_settings_show_actual_state(service,database):
     u=next(USERS)
     enable(service,u)
     settings=send(service,u,callback='ui:go:settings')
     labels=' '.join(label for row in settings.buttons for label,_ in row)
     assert 'Уведомления' not in labels and 'Распознавание' not in labels
-    for cb in ('ui:section:recognition','ui:go:ai','ui:go:voice','ui:go:receipts','monthlysettings','monthlyoff','ui:go:notify','ui:go:notify_off','ai_off'):
-        r=send(service,u,callback=cb)
-        assert r.buttons==[[('☰ Меню','ui:menu')]]
-        assert 'автоматически' in r.text
+    assert button(settings,'🔒 Данные и приватность')=='ui:go:privacy'
+    for channel in ('ai','voice','receipts'):
+        r=send(service,u,callback='ui:go:'+channel)
+        assert button(r,'Выключить')=='ui:go:'+channel+'_off'
+    send(service,u,callback='monthlyon')
+    assert 'включён' in send(service,u,callback='monthlysettings').text
+    send(service,u,'/notify off')
+    assert 'выключен' in send(service,u,callback='monthlysettings').text
+    assert query(database,u,'SELECT enabled FROM notification_preferences')==[(False,)]
 
 
 def test_ai_on_and_off_commands_reach_text_ai_settings(service,database):

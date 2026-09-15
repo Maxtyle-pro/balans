@@ -79,7 +79,7 @@ def test_voice_missing_fields_and_edit(voices,database):
     assert '⚠️ Без категории' in card.text and 'дата сообщения' in card.text
     assert query(database,u,'SELECT capture_warnings FROM operation_revisions')==[(['date'],)]
     edit=send(s,u,callback=button(card,'✏️ Изменить'))
-    send(s,u,callback=button(edit,'Дата'));edit=send(s,u,'13.09.2026')
+    send(s,u,callback=button(edit,'Изменить дату'));edit=send(s,u,'13.09.2026')
     saved=send(s,u,callback=button(edit,'Сохранить изменения'));check(saved)
     assert 'дата сообщения' not in saved.text
     assert query(database,u,'SELECT count(*) FROM operations')==[(1,)]
@@ -154,7 +154,7 @@ def test_cancelled_media_can_be_recorded_again(receipts,database):
     identity=button(card,'✏️ Изменить').split(':')[1]
     send(s,u,callback='fdelete:'+identity)
     preview=send(s,u,'Ошибочная запись')
-    send(s,u,callback=button(preview,'Подтвердить'))
+    send(s,u,callback=button(preview,'Сохранить изменения'))
     check(extracted(s,ai,u,[transaction(cat)]))
     assert query(database,u,"SELECT count(*) FROM operations WHERE state='active'")==[(1,)]
     assert 'уже записан' in extracted(s,ai,u,[transaction(cat)]).text

@@ -40,8 +40,11 @@ def test_download_failure_cached(voices):
     assert bot.downloads==1 and ai.transcriptions==0
 
 
-def test_voice_recognition_stays_enabled(voices):
+def test_voice_recognition_respects_explicit_disable(voices):
     s,ai=voices;user=next(USERS);bot=MediaBot(audio())
-    assert 'автоматически' in send(s,user,'/voice off').text
+    assert 'выключена' in send(s,user,'/voice off').text
+    asyncio.run(process_update(bot,s,update(user,next(UPDATES))))
+    assert bot.downloads==0 and ai.transcriptions==0
+    send(s,user,'/voice on')
     asyncio.run(process_update(bot,s,update(user,next(UPDATES))))
     assert bot.downloads==1 and ai.transcriptions==1

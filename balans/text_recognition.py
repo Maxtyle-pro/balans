@@ -59,7 +59,7 @@ class TextRecognition:
             elif any(x.currency not in (None,job['request']['user_currency']) for x in entries):
                 reply=Reply('Валюта сообщения отличается от валюты учёта. Ничего не записано.',[[('Валюта','currencysettings')]])
             elif self._draft(c) or self._input_batch(c) or self._media_queue(c):
-                reply=Reply('Сначала завершите текущую запись, затем отправьте текст повторно.',[[('Продолжить','ui:resume')]])
+                reply=Reply('Сначала завершите текущую запись, затем отправьте текст повторно.',[[('Открыть текущую запись','ui:resume')]])
             elif any(x.kind in ('income','opening','incoming') for x in entries) and c.execute("SELECT kind='shared' AS yes FROM workspaces WHERE id=current_workspace()").fetchone()['yes']:
                 reply=Reply('Поступление в общий бюджет требует сверки.',[[('Выдачи и сверка','ui:go:funds')]])
             else:

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from aiogram.types import Update
 import pytest
 from balans.__main__ import process_update
@@ -10,6 +11,9 @@ class FakeBot:
 
     def __init__(self, fail=False):
         self.messages=[]
+        self.sent_ids=[]
+        self.deleted=[]
+        self._next_message_id=900000
         self.fail=fail
 
     async def answer_callback_query(self, query_id):
@@ -20,10 +24,17 @@ class FakeBot:
             self.fail=False
             raise ConnectionError('Simulated disconnect after database commit')
         self.messages.append((chat_id,text,kwargs))
+        message=SimpleNamespace(message_id=self._next_message_id)
+        self._next_message_id+=1
+        self.sent_ids.append(message.message_id)
+        return message
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted.append((chat_id,message_id))
 
 
-def update(number, text=None, chat_type='private', query=None):
-    message={'message_id':number,'date':int(datetime.now(timezone.utc).timestamp()),
+def update(number, text=None, chat_type='private', query=None, message_id=None):
+    message={'message_id':number if message_id is None else message_id,'date':int(datetime.now(timezone.utc).timestamp()),
              'chat':{'id':555000 if chat_type=='private' else -100,'type':chat_type},
              'from':{'id':555000,'is_bot':False,'first_name':'Tester'}}
     if text is not None:
@@ -87,3 +98,38 @@ def test_single_start_and_redelivery_send_one_reply(service):
     assert service.next_update(bot.id) is None
     assert len(bot.messages)==1
     assert 'С чего начнём?' in bot.messages[0][1]
+
+
+def test_edit_replaces_original_card_and_temporary_editor_messages(service):
+    from test_automatic_capture import enable
+    bot=FakeBot();user=555000
+    enable(service,user)
+    asyncio.run(process_update(bot,service,update(50100,'Кофе 100')))
+    original_card_id=bot.sent_ids[-1]
+    original=bot.messages[-1][2]['reply_markup']
+    edit_callback=next(b.callback_data for row in original.inline_keyboard for b in row if b.text=='✏️ Изменить')
+
+    asyncio.run(process_update(bot,service,update(50110,query=edit_callback,message_id=original_card_id)))
+    editor_id=bot.sent_ids[-1]
+    editor=bot.messages[-1][2]['reply_markup'].inline_keyboard
+    labels=[b.text for row in editor for b in row]
+    assert labels==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Отмена']
+    assert 'Сохранить изменения' not in labels
+    assert 'Назад к списку' not in labels
+
+    amount_callback=next(b.callback_data for row in editor for b in row if b.text=='Изменить сумму')
+    asyncio.run(process_update(bot,service,update(50111,query=amount_callback,message_id=editor_id)))
+    prompt_id=bot.sent_ids[-1]
+    save_input=update(50112,'150')
+    asyncio.run(process_update(bot,service,save_input))
+    changed_editor_id=bot.sent_ids[-1]
+    changed=bot.messages[-1][2]['reply_markup'].inline_keyboard
+    changed_labels=[b.text for row in changed for b in row]
+    assert changed_labels==['Изменить сумму','Изменить дату','Изменить описание','Изменить категорию','Сохранить изменения','Отмена']
+
+    save_callback=next(b.callback_data for row in changed for b in row if b.text=='Сохранить изменения')
+    asyncio.run(process_update(bot,service,update(50113,query=save_callback,message_id=changed_editor_id)))
+    assert {original_card_id,editor_id,prompt_id,changed_editor_id} <= {message_id for _,message_id in bot.deleted}
+    new_card=bot.messages[-1][2]['reply_markup'].inline_keyboard
+    assert [b.text for row in new_card for b in row]==['✏️ Изменить']
+    assert bot.sent_ids[-1] not in {message_id for _,message_id in bot.deleted}

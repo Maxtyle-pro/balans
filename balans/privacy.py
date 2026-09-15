@@ -47,7 +47,7 @@ class Privacy:
         if path.is_symlink():raise RuntimeError('Реестр удалений не должен быть ссылкой.')
         with os.fdopen(os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600),'a') as f:f.write(json.dumps(record)+'\n');f.flush();os.fsync(f.fileno())
 
-    def handle(self,telegram_id,bot_id,update_id,text,sent_at,callback=None):
+    def handle(self,telegram_id,bot_id,update_id,text,sent_at,callback=None,message_id=None):
         with self._actor_transaction(telegram_id) as c:
             blocked=self._privacy_blocked(c)
             if blocked:return blocked
@@ -60,7 +60,7 @@ class Privacy:
                 request=c.execute('SELECT * FROM erasure_requests WHERE id=%s',(identity,)).fetchone()
                 self._log_erasure(request)
                 return Reply('Удаление подтверждено. Доступ закрыт немедленно; личные данные и файлы удаляются в течение 7 дней. Общая история других участников сохраняется, ваши общие бюджеты архивированы.')
-        return self._handle_impl(telegram_id,bot_id,update_id,text,sent_at,callback)
+        return self._handle_impl(telegram_id,bot_id,update_id,text,sent_at,callback,message_id)
 
     def _privacy_consent_gate(self,c):
         if c.execute('SELECT required FROM privacy_policy').fetchone()['required'] and not c.execute('SELECT 1 FROM user_settings WHERE user_id=actor_user_id() AND service_consent_version=(SELECT version FROM privacy_policy)').fetchone():return Reply('Сначала ознакомьтесь с условиями: /privacy')
@@ -87,10 +87,10 @@ class Privacy:
             if arg not in ('','on','off'):raise ValueError('/retention on или /retention off — хранение личных оригиналов после обработки.')
             if arg:c.execute('UPDATE user_settings SET keep_personal_originals=%s WHERE user_id=%s',(arg=='on',user))
             row=c.execute('SELECT keep_personal_originals FROM user_settings WHERE user_id=%s',(user,)).fetchone()
-            return Reply('Хранение личных оригиналов после обработки: '+('до 90 дней' if row['keep_personal_originals'] else 'выключено')+'. При выключении существующие личные оригиналы удалятся при ближайшей очистке. Для общих документов действует срок 90 дней. Перед удалением предложим платное продление.\n/retention on или off')
+            return Reply('Хранение личных оригиналов после обработки: '+('до 90 дней' if row['keep_personal_originals'] else 'выключено')+'. При выключении существующие личные оригиналы удалятся при ближайшей очистке. Для общих документов действует срок 90 дней. Перед удалением предложим скачать архив.\n/retention on или off')
         if command=='/privacy':
             p=c.execute('SELECT * FROM privacy_policy').fetchone()
-            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. После принятия условий сервиса распознавание текста, голоса и изображений включено по умолчанию; отдельное разрешение перед отправкой файла не требуется. Каналы можно отключить командами /ai off, /voice off и /receipts off.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 90 дней; /retention off отключает хранение после обработки. Общие оригиналы — 90 дней. Перед удалением предложим платное продление на 90 дней.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
+            return Reply('Приватность\nЛичные операции доступны вам; в общем бюджете руководитель видит общую историю по правилам /join. После принятия условий сервиса распознавание текста, голоса и изображений включено по умолчанию; отдельное разрешение перед отправкой файла не требуется. Каналы можно отключить командами /ai off, /voice off и /receipts off.\nГолосовой исходник обрабатывается в памяти и не сохраняется. Личные изображения — до 90 дней; /retention off отключает хранение после обработки. Общие оригиналы — 90 дней. Перед удалением предложим скачать архив. Платное продление для обычных пользователей пока недоступно.\n/delete — удаление личного профиля. Платёжные записи: '+p['payment_retention']+f"\nУсловия: {p['terms_url'] or 'ещё не опубликованы'}\nПолитика: {p['privacy_url'] or 'ещё не опубликована'}\nСтрана оператора: {p['operator_country'] or 'не настроена'}; размещение: {p['storage_country'] or 'не настроено'}",[[('Принимаю условия и политику',f"privacyaccept:{p['version']}")]] if p['terms_url'] and p['privacy_url'] else [])
         return None
 
     def _privacy_callback(self,c,user,callback):

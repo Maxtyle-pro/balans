@@ -130,7 +130,7 @@ class MediaFlow:
 
     def _media_duplicates(self,c,item):
         if not item.get('amount') or not item.get('occurred_on'):return []
-        return c.execute("SELECT o.id,r.description,r.amount,r.occurred_on FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.state='active' AND o.kind=%s AND ((r.amount=%s AND r.occurred_on=%s) OR (%s::text IS NOT NULL AND r.external_reference_hash=%s)) AND NOT EXISTS(SELECT 1 FROM operation_drafts d JOIN receipt_batches b ON b.id=d.receipt_batch_id WHERE d.id=o.source_draft_id AND b.parent_batch_id=%s::uuid) ORDER BY o.created_at DESC LIMIT 3",(item['kind'],Decimal(item['amount']),item['occurred_on'],item.get('reference_hash'),item.get('reference_hash'),item.get('split_group'))).fetchall()
+        return c.execute("SELECT o.id,r.description,r.amount,r.occurred_on FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.state='active' AND o.kind=%s AND r.currency=%s AND ((r.amount=%s AND r.occurred_on=%s) OR (%s::text IS NOT NULL AND r.external_reference_hash=%s)) AND NOT EXISTS(SELECT 1 FROM operation_drafts d JOIN receipt_batches b ON b.id=d.receipt_batch_id WHERE d.id=o.source_draft_id AND b.parent_batch_id=%s::uuid) ORDER BY o.created_at DESC LIMIT 3",(item['kind'],item['currency'],Decimal(item['amount']),item['occurred_on'],item.get('reference_hash'),item.get('reference_hash'),item.get('split_group'))).fetchall()
 
     def _media_card(self,c,q,index):
         captured=self._capture_media_item(c,q,index)
@@ -170,7 +170,9 @@ class MediaFlow:
         if duplicates and not item['duplicate_confirmed']:
             text+='\nВозможный дубль: совпала сумма/дата или идентификатор. Можно прикрепить изображение к существующей записи.'
             buttons.append([('Это отдельная операция',f'mduplicate:{suffix}')])
-            for r in duplicates:buttons.append([(f"Прикрепить к {r['description'][:35]}",f"mlink:{r['id']}")])
+            for r in duplicates:
+                token=c.execute('INSERT INTO fund_confirmations(workspace_id,author_user_id,payload) VALUES(current_workspace(),actor_user_id(),%s) RETURNING id',(Jsonb(dict(action='media_candidate',queue=str(q['id']),index=index,version=q['version'],operation=str(r['id']))),)).fetchone()['id']
+                buttons.append([(f"Прикрепить к {r['description'][:35]}",f"mlink:{token}")])
         if not item['paid']:
             text+='\nПодтвердите факт совершения операции. Статус ожидания/отказа на изображении сам по себе не подтверждает оплату.'
             buttons.append([('Операция совершена',f'mpaid:{suffix}'),('Ещё не совершена',f'mhold:{suffix}')])
@@ -234,6 +236,7 @@ class MediaFlow:
                 d=c.execute("INSERT INTO operation_drafts(workspace_id,author_user_id,account_id,amount,description,occurred_on,category_id,timezone_snapshot,source_sent_at,step,kind,destination_account_id,refund_of,receipt_batch_id,receipt_currency,payment_confirmed,duplicate_confirmed,merchant,source_type,external_reference_hash) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,'confirm',%s,%s,%s,%s,%s,true,%s,%s,%s,%s) RETURNING id",(q['workspace_id'],q['author_user_id'],UUID(item['account']),Decimal(item['amount']),item['description'] or item['merchant'] or 'Операция по изображению',item['occurred_on'],UUID(item['category_id']) if item['category_id'] else None,batch['timezone_snapshot'],batch['source_sent_at'],item['kind'],UUID(item['destination']) if item['destination'] else None,UUID(item['refund']) if item['refund'] else None,child,item['currency'],bool(item['duplicate_confirmed'] or item.get('split_group')),item['merchant'],item['source_type'],item.get('reference_hash'))).fetchone()['id']
                 for line_no,line in enumerate(item['items'],1):c.execute('INSERT INTO receipt_items(workspace_id,author_user_id,batch_id,line_no,name,quantity,unit_price,line_total,discount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)',(q['workspace_id'],q['author_user_id'],child,line_no,line['name'],number(line['quantity'],True),number(line['unit_price']),number(line['line_total']),number(line['discount'])))
                 c.execute('UPDATE operation_drafts SET capture_warnings=%s WHERE id=%s',(item.get('capture_warnings',[]),d))
+                if item.get('split_parent_id'):c.execute('UPDATE operation_drafts SET split_parent_id=%s WHERE id=%s',(UUID(item['split_parent_id']),d))
                 identity=self._save_operation(c,d);kind='operation'
                 if not self._capture_enabled(c) and item['kind']=='expense' and item.get('suggested_category')!=item['category_id']:
                     operation=c.execute('SELECT o.current_revision_id,r.description FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.id=%s',(identity,)).fetchone()
@@ -253,12 +256,18 @@ class MediaFlow:
         if not q:return Reply('Список завершён или недоступен. Повторных записей нет.')
         if action in ('msplit','mallcat','mc','mgroup'):return self._media_category_callback(c,q,action,raw)
         if action=='mlink':
+            candidate=c.execute("SELECT payload FROM fund_confirmations WHERE id=%s AND state='pending' AND expires_at>now()",(UUID(raw),)).fetchone()
+            if candidate and candidate['payload'].get('action')=='media_candidate':
+                p=candidate['payload']
+                if p['queue']!=str(q['id']) or p['version']!=q['version']:return Reply('Список изменился. Откройте нужную строку заново.',[[('Открыть список','ui:resume')]])
+                q['selected_index']=p['index'];raw=p['operation']
+            elif self._capture_enabled(c):return Reply('Карточка устарела. Откройте актуальную запись из истории.',[[('Открыть историю','history')]])
             if q['selected_index'] is None:return self._media_list(c,q)
             item=q['items'][q['selected_index']]
             candidates=self._media_duplicates(c,item)
             if UUID(raw) not in [r['id'] for r in candidates]:return Reply('Запись недоступна для сопоставления.')
             token=c.execute('INSERT INTO fund_confirmations(workspace_id,author_user_id,payload) VALUES(current_workspace(),actor_user_id(),%s) RETURNING id',(Jsonb({'action':'media_link','queue':str(q['id']),'index':q['selected_index'],'version':q['version'],'operation':raw}),)).fetchone()['id']
-            return Reply('Прикрепить изображения к существующей операции '+raw+'? Нового расхода не будет.',[[('Прикрепить без нового расхода',f"mlinkok:{token}")]])
+            return Reply('Прикрепить изображения к «'+next(r['description'] for r in candidates if r['id']==UUID(raw))+'»? Нового расхода не будет.',[[('Прикрепить без нового расхода',f"mlinkok:{token}")]])
         if action=='mlinkok':
             token=c.execute("SELECT * FROM fund_confirmations WHERE id=%s AND state='pending' AND expires_at>now()",(UUID(raw),)).fetchone()
             if not token or token['payload'].get('action')!='media_link':return Reply('Подтверждение недоступно.')
@@ -266,7 +275,7 @@ class MediaFlow:
             if p['queue']!=str(q['id']) or p['version']!=q['version']:return Reply('Список изменился. Повторите сопоставление.')
             ds=self._document_set(c,'operation',UUID(p['operation']))
             for f in c.execute('SELECT * FROM receipt_files WHERE batch_id=%s',(q['source_batch_id'],)).fetchall():self._store_document(c,ds,self.receipt_storage.read(f['id']),f['mime_type'],receipt=f['id'])
-            q['items'][p['index']]['state']='saved';q['items'][p['index']]['result_id']=p['operation']
+            q['items'][p['index']]['state']='saved';q['items'][p['index']]['result_id']=p['operation'];q['items'][p['index']]['result_kind']='operation'
             c.execute("UPDATE fund_confirmations SET state='done' WHERE id=%s",(token['id'],))
             q=c.execute('UPDATE media_queues SET items=%s,version=version+1 WHERE id=%s RETURNING *',(Jsonb(q['items']),q['id'])).fetchone()
             return self._media_list(c,q)

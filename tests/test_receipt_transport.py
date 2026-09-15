@@ -74,8 +74,11 @@ def test_missing_source_delivery_keeps_bot_running():
     assert 'Данные расхода сохранены' in bot.messages[-1][0]
 
 
-def test_receipt_recognition_stays_enabled(receipts):
+def test_receipt_recognition_respects_explicit_disable(receipts):
     s,_,_=receipts;user=next(USERS);bot=MediaBot(photo_bytes())
-    assert 'автоматически' in send(s,user,'/receipts off').text
+    assert 'выключена' in send(s,user,'/receipts off').text
+    asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
+    assert bot.downloads==0
+    send(s,user,'/receipts on')
     asyncio.run(process_update(bot,s,photo_update(user,next(IDS))))
     assert bot.downloads==1

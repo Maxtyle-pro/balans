@@ -39,6 +39,18 @@ class Documents:
         if not 1<=page<=20:raise ValueError('Страница недоступна.')
         docs=c.execute("SELECT *,expires_at IS NULL OR expires_at>now() AS fresh FROM documents WHERE set_id=%s ORDER BY created_at,id LIMIT 100",(ds['id'],)).fetchall()
         active=[d for d in docs if d['state']=='active' and d['fresh']]
+        personal=c.execute("SELECT kind='personal' AS yes FROM workspaces WHERE id=current_workspace()").fetchone()['yes']
+        if personal and ds['entity_kind']=='operation':
+            operation=c.execute('SELECT r.description FROM operations o JOIN operation_revisions r ON r.id=o.current_revision_id WHERE o.id=%s',(ds['id'],)).fetchone()
+            text='📎 Документы к «'+operation['description']+'»\n'+(f'Прикреплено файлов: {len(active)}' if active else 'Доступных файлов пока нет.')
+            buttons=[[('Добавить чек/документ',f"docadd:operation:{ds['id']}")]]
+            for i,d in enumerate(active[(page-1)*5:page*5],(page-1)*5+1):
+                buttons.append([(f'Скачать оригинал {i}',f"docopen:{d['id']}")])
+                buttons.append([(f'Заменить файл {i}',f"docreplace:{d['id']}")])
+            if len(active)>page*5:buttons.append([('Следующие документы',f"docpage:{ds['id']}:{page+1}")])
+            if page>1:buttons.append([('Предыдущие документы',f"docpage:{ds['id']}:{page-1}")])
+            buttons.append([('← К операции',f"fedit:{ds['id']}")])
+            return Reply(text,buttons)
         text=f"Документы · {self._workspace_name(c)}\nЗапись: {ds['id']}\n{ds['occurred_on']} · {money(ds['amount'],ds['currency'])}\n{DOC_STATUS[ds['status']]} · "+(f'Документ приложен: {len(active)}' if active else 'Без документа')
         if ds['request_text']:text+='\nЗапрос: '+ds['request_text']
         if ds['exception_reason']:text+='\nИсключение: '+ds['exception_reason']
@@ -60,6 +72,8 @@ class Documents:
         if self._media_queue(c) or self._draft(c) or self._voice_busy(c) or c.execute("SELECT id FROM receipt_batches WHERE state IN ('collecting','processing')").fetchone():return Reply('Сначала завершите текущий ввод или /cancel.')
         c.execute("UPDATE document_uploads SET state='cancelled' WHERE state='pending'")
         c.execute('INSERT INTO document_uploads(workspace_id,author_user_id,set_id,replaces_id) VALUES(current_workspace(),actor_user_id(),%s,%s)',(ds['id'],replacement))
+        if kind=='operation' and c.execute("SELECT kind='personal' AS yes FROM workspaces WHERE id=current_workspace()").fetchone()['yes']:
+            return Reply('📎 Пришлите JPEG, PNG или PDF до 15 МБ для выбранной операции. Файл прикрепится без распознавания и без новой операции.',[[('Отмена','ui:go:cancel')]])
         return Reply(f"Прикрепление к записи {ds['id']} · {self._workspace_name(c)}\nОтправьте JPEG, PNG или PDF до 15 МБ (PDF — до 500 страниц). Файл будет сохранён как документ, новая финансовая операция не создаётся. AI для прикрепления не используется. /cancel — отменить.")
 
     def _store_document(self,c,ds,data,mime,replacement=None,receipt=None):

@@ -11,6 +11,10 @@ QUOTA_NAMES={'text':'ИИ-распознавания текста','image':'Ра
 PACKS={'text':(100,25),'image':(50,50),'voice':(1800,50),'analysis':(10,50),'upgrade':(1,100),'storage':(90,25)}
 
 class Addons:
+    def _addons_available(self,c,storage=False):
+        if not storage:return bool(self._demo_state(c))
+        return bool(c.execute('SELECT 1 FROM billing_demo d JOIN workspaces w ON w.id=current_workspace() WHERE d.user_id=actor_user_id() AND d.allowed AND d.enabled AND w.owner_user_id=actor_user_id()').fetchone())
+
     def _quota_card(self,c,kind,exhausted=True):
         access=c.execute('SELECT billing_access() AS data').fetchone()['data']
         usage=c.execute('SELECT billing_usage() AS data').fetchone()['data']
@@ -18,7 +22,8 @@ class Addons:
         text=('🤖 Лимит ИИ исчерпан.' if exhausted else '🤖 Осталось не больше 20% лимита ИИ.')+f'\n{QUOTA_NAMES[kind]}: {used} из {maximum}.'
         if access.get('period_end'):text+='\nЛимит обновится: '+self._local_deadline(c,access['period_end'])+'.'
         text+='\nРучной ввод остаётся доступен. Ошибки обработки не расходуют лимит.'
-        return Reply(text,[[('Добавить пакет',f'addon:{kind}')],[('Выбрать тариф','addon:upgrade')],[('Ввести вручную','ui:go:manual')]])
+        buttons=[[('Добавить пакет',f'addon:{kind}')],[('Выбрать тариф','addon:upgrade')]] if self._addons_available(c) else [[('Моя подписка','subscription')]]
+        return Reply(text,buttons+[[('Ввести вручную','ui:go:manual')]])
 
     def _quota_preflight(self,c,kind,quantity=1):
         access=c.execute('SELECT billing_access() AS data').fetchone()['data']
@@ -52,7 +57,10 @@ class Addons:
         if not row:return Reply('Файлы недоступны.',[[('Меню','ui:menu')]])
         if row['extended_at']:return Reply('✅ Хранение этих файлов уже продлено на 90 дней.',[[('Меню','ui:menu')]])
         deadline=max(row['deadline'],row['notice_sent_at']+timedelta(days=7)) if row['notice_sent_at'] else row['deadline']
-        return Reply(f"📎 Файлов: {len({f.get('sha',f['id']) for f in row['files']})}.\nСрок хранения: {self._local_deadline(c,deadline)}.\n\nПродлить на 90 дней можно за дополнительную плату. Без продления файлы удалятся в срок. Операции, категории и отчёты останутся.",[[('Продлить на 90 дней',f'storagebuy:{batch}')],[('Скачать архив',f'storagezip:{batch}')],[('Удалить в срок',f'storageskip:{batch}')]])
+        demo=self._addons_available(c,storage=True)
+        text=f"📎 Файлов: {len({f.get('sha',f['id']) for f in row['files']})}.\nСрок хранения: {self._local_deadline(c,deadline)}.\n\nСкачайте архив до удаления. Операции, категории и отчёты останутся."
+        if demo:text+='\nПродление на 90 дней доступно в тестовом режиме.'
+        return Reply(text,([[('Продлить на 90 дней',f'storagebuy:{batch}')]] if demo else [])+[[('Скачать архив',f'storagezip:{batch}')],[('Удалить в срок',f'storageskip:{batch}')]])
 
     def _retention_archive(self,c,batch,part=None):
         row=c.execute('SELECT * FROM retention_batches WHERE id=%s AND user_id=actor_user_id() AND workspace_id=current_workspace()',(batch,)).fetchone()
@@ -83,9 +91,10 @@ class Addons:
 
     def _storage_overview(self,c):
         rows=c.execute("SELECT id,deadline,extended_at FROM retention_batches WHERE user_id=actor_user_id() AND workspace_id=current_workspace() AND extended_at IS NULL ORDER BY deadline LIMIT 20").fetchall()
-        return Reply('📎 Фото, чеки и документы хранятся 90 дней.\nПеред удалением предложим платное продление ещё на 90 дней или скачивание архива. Без автоматического списания. Операции и отчёты сохранятся.'+('\n\nВыберите подборку файлов:' if rows else '\n\nСейчас нет файлов, срок хранения которых подходит к концу.'),[[(f"Файлы до {r['deadline']:%d.%m.%Y}",f"storage:{r['id']}")] for r in rows]+[[('Меню','ui:menu')]])
+        return Reply('📎 Базовый срок хранения фото, чеков и документов — 90 дней.\nПеред удалением предложим скачать архив. Операции и отчёты сохранятся.'+('\n\nВыберите подборку файлов:' if rows else '\n\nСейчас нет файлов, срок хранения которых подходит к концу.'),[[(f"Файлы до {r['deadline']:%d.%m.%Y}",f"storage:{r['id']}")] for r in rows]+[[('Меню','ui:menu')]])
 
     def _addon_callback(self,c,user,callback):
+        if callback=='addonmenu' and not self._addons_available(c):return self._addon_offer(c,'text')
         if callback=='addonmenu':return Reply('Выберите дополнительный пакет. Цена и срок будут показаны перед подтверждением.',[[(label,'addon:'+kind)] for kind,label in QUOTA_NAMES.items()]+[[('Назад','subscription')]])
         if callback.startswith('addon:'):
             kind=callback.split(':')[1]
